@@ -1,12 +1,13 @@
 from fastapi import APIRouter, Depends
 from sqlmodel import Session, select
 from database.connection import get_session
-from database.models import Skill, AgentDefinition
+from database.models import Skill
 from pydantic import BaseModel
 from typing import Optional
 import uuid
 
 router = APIRouter()
+
 
 class SkillCreate(BaseModel):
     name: str
@@ -15,6 +16,7 @@ class SkillCreate(BaseModel):
     trigger: str = "manual"
     is_enabled: bool = True
 
+
 class SkillUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
@@ -22,10 +24,6 @@ class SkillUpdate(BaseModel):
     trigger: Optional[str] = None
     is_enabled: Optional[bool] = None
 
-class AgentCreate(BaseModel):
-    name: str
-    description: str = ""
-    graph_json: str = "{}"
 
 @router.get("/api/skills")
 def list_skills(session: Session = Depends(get_session)):
@@ -43,6 +41,7 @@ def list_skills(session: Session = Depends(get_session)):
         for s in skills
     ]
 
+
 @router.post("/api/skills")
 def create_skill(body: SkillCreate, session: Session = Depends(get_session)):
     skill = Skill(
@@ -56,6 +55,7 @@ def create_skill(body: SkillCreate, session: Session = Depends(get_session)):
     session.add(skill)
     session.commit()
     return {"id": skill.id, "ok": True}
+
 
 @router.patch("/api/skills/{skill_id}")
 def update_skill(skill_id: str, body: SkillUpdate, session: Session = Depends(get_session)):
@@ -76,6 +76,7 @@ def update_skill(skill_id: str, body: SkillUpdate, session: Session = Depends(ge
     session.commit()
     return {"ok": True}
 
+
 @router.delete("/api/skills/{skill_id}")
 def delete_skill(skill_id: str, session: Session = Depends(get_session)):
     skill = session.get(Skill, skill_id)
@@ -84,23 +85,3 @@ def delete_skill(skill_id: str, session: Session = Depends(get_session)):
     session.delete(skill)
     session.commit()
     return {"ok": True}
-
-@router.get("/api/agents")
-def list_agents(session: Session = Depends(get_session)):
-    agents = session.exec(select(AgentDefinition)).all()
-    return [
-        {"id": a.id, "name": a.name, "description": a.description}
-        for a in agents
-    ]
-
-@router.post("/api/agents")
-def create_agent(body: AgentCreate, session: Session = Depends(get_session)):
-    agent = AgentDefinition(
-        id=str(uuid.uuid4()),
-        name=body.name,
-        description=body.description,
-        graph_json=body.graph_json,
-    )
-    session.add(agent)
-    session.commit()
-    return {"id": agent.id, "ok": True}

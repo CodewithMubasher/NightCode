@@ -5,9 +5,9 @@ from database.models import Conversation, Message
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
-import uuid
 
 router = APIRouter()
+
 
 class ConversationCreate(BaseModel):
     id: str
@@ -16,11 +16,13 @@ class ConversationCreate(BaseModel):
     model_id: str = ""
     provider_name: str = ""
 
+
 class ConversationUpdate(BaseModel):
     title: Optional[str] = None
     mode: Optional[str] = None
     model_id: Optional[str] = None
     provider_name: Optional[str] = None
+
 
 @router.get("/api/conversations")
 def list_conversations(session: Session = Depends(get_session)):
@@ -41,6 +43,7 @@ def list_conversations(session: Session = Depends(get_session)):
         for c in conversations
     ]
 
+
 @router.post("/api/conversations")
 def create_conversation(body: ConversationCreate, session: Session = Depends(get_session)):
     conv = Conversation(
@@ -53,6 +56,7 @@ def create_conversation(body: ConversationCreate, session: Session = Depends(get
     session.add(conv)
     session.commit()
     return {"ok": True}
+
 
 @router.get("/api/conversations/{conv_id}")
 def get_conversation(conv_id: str, session: Session = Depends(get_session)):
@@ -72,14 +76,16 @@ def get_conversation(conv_id: str, session: Session = Depends(get_session)):
                 "id": m.id,
                 "role": m.role,
                 "content": m.content,
-                "reasoning": m.reasoning,
+                "status": m.status,
                 "mode": m.mode,
                 "model_id": m.model_id,
+                "provider_name": m.provider_name,
                 "created_at": m.created_at.isoformat(),
             }
             for m in conv.messages
         ],
     }
+
 
 @router.patch("/api/conversations/{conv_id}")
 def update_conversation(conv_id: str, body: ConversationUpdate, session: Session = Depends(get_session)):
@@ -98,6 +104,7 @@ def update_conversation(conv_id: str, body: ConversationUpdate, session: Session
     session.add(conv)
     session.commit()
     return {"ok": True}
+
 
 @router.delete("/api/conversations/{conv_id}")
 def delete_conversation(conv_id: str, session: Session = Depends(get_session)):

@@ -2,17 +2,12 @@ import asyncio
 import ast
 from typing import Any
 
-SAFE_BUILTINS = {
-    "print", "len", "range", "enumerate", "zip", "map", "filter",
-    "sorted", "reversed", "sum", "min", "max", "abs", "round",
-    "int", "float", "str", "bool", "list", "dict", "tuple", "set",
-    "isinstance", "type", "hasattr", "getattr",
+ALLOWED_IMPORTS = {
+    "math", "json", "random", "datetime", "collections", "itertools",
+    "functools", "string", "re", "decimal", "pathlib",
 }
 
-BLOCKED_IMPORTS = {
-    "os", "sys", "subprocess", "socket", "shutil", "pathlib",
-    "importlib", "ctypes", "multiprocessing", "threading",
-}
+READONLY_OS_FUNCS = {"getcwd", "listdir", "walk", "scandir", "stat", "lstat", "getpid", "cpu_count", "uname", "name"}
 
 class ToolError(Exception):
     pass
@@ -27,15 +22,21 @@ def _is_safe_code(code: str) -> tuple[bool, str]:
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             names = [a.name for a in node.names] if isinstance(node, ast.Import) else [node.module]
             for name in names:
-                if name and name.split(".")[0] in BLOCKED_IMPORTS:
+                base = name.split(".")[0] if name else ""
+                if base and base not in ALLOWED_IMPORTS:
                     return False, (
-                        f"Import '{name}' is blocked for security. "
-                        f"Available alternatives: use built-in functions only. "
-                        f"For math: use math module. For data: use lists/dicts. "
-                        f"For file operations: use the read_file, write_file, list_directory tools instead of os/pathlib."
+                        f"Import '{name}' is not allowed. "
+                        f"Allowed: {', '.join(sorted(ALLOWED_IMPORTS))}. "
+                        f"For file ops use write_file/read_file/list_directory tools."
                     )
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Attribute):
+                if isinstance(node.func.value, ast.Name) and node.func.value.id == "os":
+                    if node.func.attr not in READONLY_OS_FUNCS:
+                        return False, f"os.{node.func.attr}() is blocked (read-only os functions only: {', '.join(sorted(READONLY_OS_FUNCS))})"
 
     return True, ""
+
 
 async def execute_code(code: str, timeout: int = 10) -> str:
     is_safe, reason = _is_safe_code(code)
@@ -48,11 +49,17 @@ async def execute_code(code: str, timeout: int = 10) -> str:
     output = io.StringIO()
     local_vars: dict[str, Any] = {}
 
+    safe_builtins = dict(__builtins__) if isinstance(__builtins__, dict) else __builtins__.__dict__.copy()
+    safe_builtins["__import__"] = __import__
+    safe_builtins["open"] = open
+    safe_builtins["dir"] = dir
+    safe_builtins["vars"] = vars
+
     def run():
         with contextlib.redirect_stdout(output):
             exec(
                 compile(code, "<nightcode>", "exec"),
-                {"__builtins__": {k: __builtins__[k] for k in SAFE_BUILTINS if k in __builtins__}},
+                {"__builtins__": safe_builtins, "os": __import__("os")},
                 local_vars,
             )
 
@@ -60,7 +67,7 @@ async def execute_code(code: str, timeout: int = 10) -> str:
         loop = asyncio.get_event_loop()
         await asyncio.wait_for(
             loop.run_in_executor(None, run),
-            timeout=timeout
+            timeout=timeout,
         )
         result = output.getvalue()
         return result if result else "Code executed successfully (no output)."

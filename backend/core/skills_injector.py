@@ -1,3 +1,4 @@
+import os
 from sqlmodel import Session, select
 from database.models import Skill
 
@@ -23,7 +24,10 @@ def build_system_prompt(
             "build": (
                 "You are NightCode in Build mode. "
                 "You have access to tools. Use them to accomplish the task. "
-                "Explain what you're doing at each step."
+                "IMPORTANT: All file paths must be absolute. Your working directory is "
+                + os.getcwd() + ". "
+                "When the task is complete, respond with a final answer without any tool calls. "
+                "Do not keep using tools after the task is done."
             ),
         }
         parts.append(mode_prompts.get(mode, mode_prompts["chat"]))

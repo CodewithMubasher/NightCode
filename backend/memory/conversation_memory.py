@@ -1,6 +1,7 @@
 from sqlmodel import Session, select
 from database.models import Message
 
+
 def load_memory(
     session: Session,
     conversation_id: str,
@@ -18,5 +19,5 @@ def load_memory(
     return [
         {"role": m.role, "content": m.content}
         for m in messages
-        if m.content.strip()
+        if m.content.strip() and m.status != "error"
     ]

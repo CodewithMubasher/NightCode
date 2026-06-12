@@ -2,17 +2,26 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from database.connection import create_tables, engine
-from database.models import Provider, Model
+from database.models import Provider, Model, Message
 from sqlmodel import Session, select
+from sqlalchemy import text
 from api.chat import router as chat_router
 from api.providers import router as providers_router
 from api.conversations import router as conversations_router
 from api.settings import router as settings_router
+from tools.registry import ToolRegistry
+from tools.mcp_manager import MCPManager, configure_servers
+from tools.web_search import web_search
+from tools.code_executor import execute_code
+from tools.file_ops import read_file, write_file, list_directory, grep_files
 import os
 import httpx
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
 load_dotenv()
+
+HEARTBEAT_TIMEOUT_MINUTES = 5
 
 
 def _has_key(provider: Provider) -> bool:
@@ -22,7 +31,6 @@ def _has_key(provider: Provider) -> bool:
 def seed_providers():
     with Session(engine) as session:
         existing_providers = {p.name: p for p in session.exec(select(Provider)).all()}
-
         providers = [
             Provider(name="openrouter", display_name="OpenRouter",
                      api_key_env="OPENROUTER_API_KEY"),
@@ -40,6 +48,93 @@ def seed_providers():
             if p.name not in existing_providers:
                 session.add(p)
         session.commit()
+
+
+def setup_tools(registry: ToolRegistry) -> None:
+    web_search_params = {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "Search query"},
+            "num_results": {"type": "integer", "description": "Number of results (default 5)"},
+        },
+        "required": ["query"],
+    }
+    registry.register_python("web_search", web_search,
+                             "Search the web for current information", web_search_params, timeout=10)
+
+    code_exec_params = {
+        "type": "object",
+        "properties": {
+            "code": {"type": "string", "description": "Python code to execute"},
+        },
+        "required": ["code"],
+    }
+    registry.register_python("run_code", execute_code,
+                             "Execute Python code in a sandbox", code_exec_params, timeout=60)
+
+    read_file_params = {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Absolute file path"},
+        },
+        "required": ["path"],
+    }
+    registry.register_python("read_file", read_file,
+                             "Read a file from the filesystem", read_file_params)
+
+    write_file_params = {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Absolute file path"},
+            "content": {"type": "string", "description": "Content to write"},
+        },
+        "required": ["path", "content"],
+    }
+    registry.register_python("write_file", write_file,
+                             "Write content to a file", write_file_params)
+
+    list_dir_params = {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Absolute directory path"},
+            "recursive": {"type": "boolean", "description": "List recursively"},
+        },
+        "required": ["path"],
+    }
+    registry.register_python("list_directory", list_directory,
+                             "List files and directories", list_dir_params)
+
+    grep_files_params = {
+        "type": "object",
+        "properties": {
+            "pattern": {"type": "string", "description": "Regex pattern"},
+            "path": {"type": "string", "description": "Absolute directory path"},
+            "file_pattern": {"type": "string", "description": "Glob pattern (default '*')"},
+        },
+        "required": ["pattern", "path"],
+    }
+    registry.register_python("grep_files", grep_files,
+                             "Search for a regex pattern in files", grep_files_params)
+
+
+def recover_orphaned_messages() -> int:
+    with Session(engine) as session:
+        cutoff = (datetime.utcnow() - timedelta(minutes=HEARTBEAT_TIMEOUT_MINUTES)).isoformat()
+        orphaned = session.exec(
+            select(Message).where(
+                Message.status == "streaming",
+                Message.heartbeat_at < cutoff,
+            )
+        ).all()
+
+        for msg in orphaned:
+            content = msg.content + "\n\n_[Recovery: connection interrupted]_"
+            msg.content = content
+            msg.status = "error"
+            session.add(msg)
+
+        session.commit()
+        return len(orphaned)
 
 
 async def sync_openrouter_models(session: Session) -> int:
@@ -138,8 +233,11 @@ async def lifespan(app: FastAPI):
     seed_providers()
     print("[startup] Providers seeded")
 
+    recovered = recover_orphaned_messages()
+    if recovered:
+        print(f"[startup] Recovered {recovered} orphaned messages")
+
     with Session(engine) as session:
-        # Wipe all stale models from old seed — only keep what sync fetches
         for m in session.exec(select(Model)).all():
             session.delete(m)
         session.commit()
@@ -151,9 +249,19 @@ async def lifespan(app: FastAPI):
         if oc_added:
             print(f"[startup] Synced {oc_added} OpenCode models")
         session.commit()
+
+    from tools import registry
+    setup_tools(registry)
+    print(f"[startup] Registered {len(registry.list_tools())} tools")
+
     yield
 
-app = FastAPI(title="NightCode Backend", version="1.0.0", lifespan=lifespan)
+    from tools.mcp_manager import MCPManager
+    if hasattr(app.state, "mcp_manager"):
+        await app.state.mcp_manager.stop_all()
+
+
+app = FastAPI(title="NightCode Backend", version="2.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -171,4 +279,10 @@ app.include_router(settings_router)
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "1.0.0"}
+    return {"status": "ok", "version": "2.0.0"}
+
+
+@app.get("/api/tools/status")
+def tool_status():
+    from tools import registry
+    return registry.get_all_statuses()
