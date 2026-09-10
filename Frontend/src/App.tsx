@@ -13,14 +13,29 @@ import {
   SidebarMenuItem,
   SidebarMenuAction,
 } from "@/components/ui/sidebar"
-import { Eclipse, Settings, CirclePlus, FolderOpen, ClockFading, Scroll, Settings2, Ellipsis } from "lucide-react"
+import { Eclipse, Settings, CirclePlus, FolderOpen, ClockFading, Scroll, Settings2, Ellipsis, ChevronDown, Check } from "lucide-react"
 import {
   Avatar,
   AvatarFallback,
 } from "@/components/ui/avatar"
 import { PromptInput } from "@/components/prompt-input"
+import { useState, useRef, useEffect } from "react"
 
 export function App() {
+  const [workspaceOpen, setWorkspaceOpen] = useState(false)
+  const [workspace, setWorkspace] = useState("my-workspace")
+  const workspaceRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (workspaceRef.current && !workspaceRef.current.contains(e.target as Node)) {
+        setWorkspaceOpen(false)
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside)
+    return () => document.removeEventListener("mousedown", handleClickOutside)
+  }, [])
+
   return (
     <SidebarProvider>
       <Sidebar>
@@ -119,6 +134,40 @@ export function App() {
         className="bg-cover bg-center bg-no-repeat"
         style={{ backgroundImage: "url('/bg.png')" }}
       >
+        <div className="relative p-4" ref={workspaceRef}>
+          <button
+            onClick={() => setWorkspaceOpen(!workspaceOpen)}
+            className="flex items-center gap-2 rounded-lg bg-white/0 px-3 py-1.5 text-sm text-white/70 cursor-pointer hover:bg-white/10"
+          >
+            <FolderOpen className="size-4" />
+            <span>Workspace</span>
+            <ChevronDown className={`size-3.5 transition-transform duration-200 ${workspaceOpen ? "rotate-180" : ""}`} />
+          </button>
+          {workspaceOpen && (
+            <div className="absolute top-full left-4 mt-1 w-52 rounded-xl border border-white/10 bg-neutral-900 shadow-lg overflow-hidden p-1">
+              <button
+                onClick={() => {
+                  setWorkspace("my-workspace")
+                  setWorkspaceOpen(false)
+                }}
+                className={`flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-xs text-white hover:bg-white/10 cursor-pointer ${workspace === "my-workspace" ? "bg-white/5" : ""}`}
+              >
+                <Check className={`size-3.5 ${workspace === "my-workspace" ? "opacity-100" : "opacity-0"}`} />
+                <FolderOpen className="size-3.5" />
+                <span>My Workspace</span>
+              </button>
+              <div className="my-1 h-px bg-white/10" />
+              <button
+                onClick={() => setWorkspaceOpen(false)}
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-xs text-white hover:bg-white/10 cursor-pointer"
+              >
+                <span className="size-3.5" />
+                <CirclePlus className="size-3.5" />
+                <span>New Workspace</span>
+              </button>
+            </div>
+          )}
+        </div>
         <PromptInput />
       </SidebarInset>
     </SidebarProvider>

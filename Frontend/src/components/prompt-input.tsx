@@ -40,8 +40,8 @@ export function PromptInput() {
   }, [])
 
   return (
-    <div className="flex h-full items-center justify-center p-4 -mt-8">
-      <div className="w-full max-w-3xl flex flex-col items-center gap-5">
+    <div className="flex h-full items-center justify-center p-4 -mt-24">
+      <div className="w-full max-w-[718px] flex flex-col items-center gap-5">
         <div className="flex items-center gap-2.5">
           <Eclipse className="size-7 text-primary" />
           <h1 className="text-2xl font-medium">What can I do for you?</h1>
