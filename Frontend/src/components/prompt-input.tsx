@@ -1,4 +1,4 @@
-import { Eclipse, Plus, Paperclip, ArrowUp, ShieldCheck, Zap, ShieldAlert, ChevronDown } from "lucide-react"
+import { Eclipse, Plus, Paperclip, ArrowUp, Square, ShieldCheck, Zap, ShieldAlert, ChevronDown } from "lucide-react"
 import { useState, useRef, useEffect, type KeyboardEvent } from "react"
 
 const options = [
@@ -17,10 +17,12 @@ const models = [
 
 interface PromptInputProps {
   onSend?: (message: string) => void
+  onCancel?: () => void
   isInChat?: boolean
+  isGenerating?: boolean
 }
 
-export function PromptInput({ onSend, isInChat = false }: PromptInputProps) {
+export function PromptInput({ onSend, onCancel, isInChat = false, isGenerating = false }: PromptInputProps) {
   const [value, setValue] = useState("")
   const [selected, setSelected] = useState("readonly")
   const [open, setOpen] = useState(false)
@@ -136,13 +138,22 @@ export function PromptInput({ onSend, isInChat = false }: PromptInputProps) {
                     </div>
                   )}
                 </div>
-                <button
-                  onClick={handleSend}
-                  disabled={!value.trim()}
-                  className="flex size-9 items-center justify-center rounded-full bg-primary text-primary-foreground transition-opacity disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-                >
-                  <ArrowUp className="size-5" />
-                </button>
+                {isGenerating ? (
+                  <button
+                    onClick={onCancel}
+                    className="flex size-9 items-center justify-center rounded-full bg-white/10 text-white transition-opacity hover:bg-white/20 cursor-pointer"
+                  >
+                    <Square className="size-4" />
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleSend}
+                    disabled={!value.trim()}
+                    className="flex size-9 items-center justify-center rounded-full bg-primary text-primary-foreground transition-opacity disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    <ArrowUp className="size-5" />
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -152,7 +163,7 @@ export function PromptInput({ onSend, isInChat = false }: PromptInputProps) {
   }
 
   return (
-    <div className="flex h-full items-center justify-center p-4 -mt-16">
+    <div className="flex h-full items-center justify-center p-4 -mt-20">
       <div className="w-full max-w-[718px] flex flex-col items-center gap-5">
         <div className="flex items-center gap-2.5">
           <Eclipse className="size-7 text-primary" />

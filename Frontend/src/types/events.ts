@@ -2,6 +2,7 @@ export type RuntimeEvent =
   | AssistantDeltaEvent
   | ToolStartedEvent
   | ToolCompletedEvent
+  | ToolFailedEvent
   | AgentCompletedEvent
   | AgentErrorEvent
 
@@ -28,6 +29,15 @@ export interface ToolCompletedEvent {
   name: string
   output?: string
   duration?: number
+  timestamp: number
+}
+
+export interface ToolFailedEvent {
+  type: "tool.failed"
+  id: string
+  toolCallId: string
+  name: string
+  error: string
   timestamp: number
 }
 
