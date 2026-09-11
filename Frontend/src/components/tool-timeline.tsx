@@ -61,7 +61,7 @@ export function ToolTimeline({ isAgentStarted, isAgentCompleted, toolEvents, sta
     <div>
       <button
         onClick={toggleExpanded}
-        className="flex items-center gap-1.5 text-white/70 cursor-pointer hover:text-white/90"
+        className="flex items-center gap-1.5 text-white/50 cursor-pointer hover:text-white/70"
       >
         <span className="text-[14px]">{summary}</span>
         <ChevronDown className={`size-3 text-white/50 transition-transform duration-200 ${isExpanded ? "" : "-rotate-90"}`} />

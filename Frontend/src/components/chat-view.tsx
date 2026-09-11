@@ -4,6 +4,7 @@ import { PromptInput } from "@/components/prompt-input"
 import { ToolTimeline } from "@/components/tool-timeline"
 import { Eclipse } from "lucide-react"
 import { emitFakeRuntime } from "@/lib/runtime"
+import type { RuntimeEvent, ToolStartedEvent, ToolCompletedEvent } from "@/types/events"
 
 interface ChatViewProps {
   chatId: string
@@ -41,21 +42,45 @@ export function ChatView({ chatId }: ChatViewProps) {
   const chat = getChat(chatId)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
-  const [phase, setPhase] = useState<Phase>("idle")
-  const [toolEvents, setToolEvents] = useState<ToolEvent[]>([])
+  const [events, setEvents] = useState<RuntimeEvent[]>([])
   const [initialText, setInitialText] = useState("")
   const [summaryText, setSummaryText] = useState("")
 
-  const phaseRef = useRef<Phase>("idle")
-  const toolEventsRef = useRef<ToolEvent[]>([])
+  const eventsRef = useRef<RuntimeEvent[]>([])
   const initialTextRef = useRef("")
   const cleanupRef = useRef<(() => void) | null>(null)
   const hasTriggeredRef = useRef(false)
 
-  const setPhaseStable = useCallback((p: Phase) => {
-    phaseRef.current = p
-    setPhase(p)
-  }, [])
+  const toolEvents: ToolEvent[] = events
+    .filter((e): e is ToolStartedEvent | ToolCompletedEvent =>
+      e.type === "tool.started" || e.type === "tool.completed"
+    )
+    .map((e) => ({
+      id: e.id,
+      type: e.type,
+      name: e.name,
+      input: e.type === "tool.started" ? e.input : undefined,
+      output: e.type === "tool.completed" ? e.output : undefined,
+      timestamp: e.timestamp,
+    }))
+
+  const hasInitialText = events.some((e) => e.type === "assistant.delta" && e.text !== "__DONE__")
+  const hasToolEvents = toolEvents.length > 0
+  const hasAgentCompleted = events.some((e) => e.type === "agent.completed")
+  const hasSummaryDone = events.some((e) => e.type === "assistant.delta" && e.text === "__DONE__" && events.indexOf(e) > events.findIndex((ev) => ev.type === "agent.completed"))
+
+  let phase: Phase = "idle"
+  if (hasInitialText && !hasToolEvents && !hasAgentCompleted) {
+    phase = "typing-initial"
+  } else if (hasToolEvents && !hasSummaryDone) {
+    phase = "showing-timeline"
+  } else if (hasAgentCompleted && !hasSummaryDone) {
+    phase = "typing-summary"
+  } else if (hasSummaryDone) {
+    phase = "idle"
+  }
+
+  const isLive = phase !== "idle"
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -74,68 +99,66 @@ export function ChatView({ chatId }: ChatViewProps) {
   }, [chat])
 
   const startRuntime = useCallback(() => {
-    setPhaseStable("typing-initial")
-    setToolEvents([])
-    toolEventsRef.current = []
+    setEvents([])
+    eventsRef.current = []
     setInitialText("")
     initialTextRef.current = ""
     setSummaryText("")
 
     const cleanup = emitFakeRuntime({
       onEvent: (event) => {
-        if (event.type === "tool.started" || event.type === "tool.completed") {
-          setToolEvents((prev) => {
-            const next = [...prev, event as ToolEvent]
-            toolEventsRef.current = next
-            return next
-          })
+        setEvents((prev) => {
+          const next = [...prev, event]
+          eventsRef.current = next
+          return next
+        })
+
+        if (event.type === "assistant.delta") {
+          if (event.text === "__DONE__") {
+            const summaryParts = summaryTextRef.current
+            addMessage(chatId, "assistant", [
+              { type: "text", text: initialTextRef.current },
+              ...toolEventsRef.current.map((te) => ({ type: "tool-call" as const, toolCallId: te.id, name: te.name, input: te.input })),
+              { type: "text", text: summaryParts },
+            ])
+            setInitialText("")
+            initialTextRef.current = ""
+            setSummaryText("")
+            setEvents([])
+            eventsRef.current = []
+          } else {
+            const isSummary = eventsRef.current.some((e) => e.type === "agent.completed")
+            if (isSummary) {
+              setSummaryText(event.text)
+              summaryTextRef.current = event.text
+            } else {
+              setInitialText(event.text)
+              initialTextRef.current = event.text
+            }
+          }
         }
-      },
-      onInitialResponse: (text) => {
-        typeText(text, (full) => {
-          setInitialText(full)
-          initialTextRef.current = full
-        }, () => {
-          setPhaseStable("showing-timeline")
-        })
-      },
-      onSummary: (text) => {
-        if (phaseRef.current !== "showing-timeline") return
-        setPhaseStable("typing-summary")
-        typeText(text, (full) => {
-          setSummaryText(full)
-        }, () => {
-          addMessage(chatId, {
-            role: "assistant",
-            content: text,
-            initialText: initialTextRef.current,
-            toolEvents: toolEventsRef.current,
-          })
-          setPhaseStable("idle")
-          setInitialText("")
-          initialTextRef.current = ""
-          setSummaryText("")
-          setToolEvents([])
-        })
+
+        if (event.type === "tool.started" || event.type === "tool.completed") {
+          toolEventsRef.current = [
+            ...toolEventsRef.current,
+            {
+              id: event.id,
+              type: event.type,
+              name: event.name,
+              input: event.type === "tool.started" ? event.input : undefined,
+              output: event.type === "tool.completed" ? event.output : undefined,
+              timestamp: event.timestamp,
+            },
+          ]
+        }
       },
     })
 
     cleanupRef.current = cleanup
-  }, [chatId, addMessage, setPhaseStable])
+  }, [chatId, addMessage])
 
-  const typeText = useCallback((text: string, onProgress: (text: string) => void, onDone: () => void) => {
-    let currentIndex = 0
-    const chars = text.split("")
-    const typeInterval = setInterval(() => {
-      if (currentIndex < chars.length) {
-        onProgress(chars.slice(0, currentIndex + 1).join(""))
-        currentIndex++
-      } else {
-        clearInterval(typeInterval)
-        onDone()
-      }
-    }, 20)
-  }, [])
+  const summaryTextRef = useRef("")
+  const toolEventsRef = useRef<ToolEvent[]>([])
 
   const handleSend = useCallback((message: string) => {
     if (cleanupRef.current) {
@@ -144,7 +167,7 @@ export function ChatView({ chatId }: ChatViewProps) {
     }
 
     hasTriggeredRef.current = true
-    addMessage(chatId, { role: "user", content: message })
+    addMessage(chatId, "user", [{ type: "text", text: message }])
 
     startRuntime()
   }, [chatId, addMessage, startRuntime])
@@ -152,7 +175,6 @@ export function ChatView({ chatId }: ChatViewProps) {
   const isTypingInitial = phase === "typing-initial"
   const showTimeline = phase === "showing-timeline" || phase === "typing-summary"
   const isTypingSummary = phase === "typing-summary"
-  const isLive = phase !== "idle"
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -182,25 +204,57 @@ export function ChatView({ chatId }: ChatViewProps) {
               <div className={`max-w-[80%] ${msg.role === "assistant" ? "flex-1 min-w-0" : ""}`}>
                 {msg.role === "assistant" ? (
                   <div className="flex flex-col gap-1 ml-1">
-                    {msg.initialText && (
-                      <p className="text-white/90 whitespace-pre-wrap leading-6">
-                        {msg.initialText}
-                      </p>
-                    )}
-                    {msg.toolEvents && msg.toolEvents.length > 0 && (
-                      <ToolTimeline
-                        isAgentStarted={true}
-                        isAgentCompleted={true}
-                        toolEvents={msg.toolEvents}
-                      />
-                    )}
-                    <p className="text-white/90 whitespace-pre-wrap leading-6">
-                      {msg.content}
-                    </p>
+                    {(() => {
+                      const textParts = msg.parts.filter((p) => p.type === "text")
+                      const hasTools = msg.parts.some((p) => p.type === "tool-call")
+                      const toolEventsForTimeline = msg.parts
+                        .filter((p) => p.type === "tool-call" || p.type === "tool-result")
+                        .reduce((acc, part) => {
+                          if (part.type === "tool-call") {
+                            acc.push({
+                              id: part.toolCallId,
+                              type: "tool.started" as const,
+                              name: part.name,
+                              input: part.input,
+                              timestamp: 0,
+                            })
+                          } else if (part.type === "tool-result") {
+                            const existing = acc.find((e) => e.id === part.toolCallId)
+                            if (existing) {
+                              existing.type = "tool.completed"
+                            }
+                          }
+                          return acc
+                        }, [] as ToolEvent[])
+
+                      return (
+                        <>
+                          {textParts[0] && (
+                            <p className="text-white/80 whitespace-pre-wrap leading-6">
+                              {textParts[0].text}
+                            </p>
+                          )}
+                          {hasTools && (
+                            <ToolTimeline
+                              isAgentStarted={true}
+                              isAgentCompleted={true}
+                              toolEvents={toolEventsForTimeline}
+                            />
+                          )}
+                          {textParts[1] && (
+                            <p className="text-white/80 whitespace-pre-wrap leading-6">
+                              {textParts[1].text}
+                            </p>
+                          )}
+                        </>
+                      )
+                    })()}
                   </div>
                 ) : (
                   <div className="rounded-2xl px-4 py-2 bg-primary text-primary-foreground">
-                    <p className="whitespace-pre-wrap">{msg.content}</p>
+                    <p className="whitespace-pre-wrap">
+                      {msg.parts.filter((p) => p.type === "text").map((p) => p.text).join("")}
+                    </p>
                   </div>
                 )}
               </div>

@@ -8,7 +8,7 @@ export function Home() {
 
   const handleSend = (message: string) => {
     const chatId = createChat(message)
-    addMessage(chatId, { role: "user", content: message })
+    addMessage(chatId, "user", [{ type: "text", text: message }])
 
     navigate({ to: "/chat/$chatId", params: { chatId } })
   }

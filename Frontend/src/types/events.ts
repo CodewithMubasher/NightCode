@@ -1,31 +1,48 @@
-export interface ToolEvent {
+export type RuntimeEvent =
+  | AssistantDeltaEvent
+  | ToolStartedEvent
+  | ToolCompletedEvent
+  | AgentCompletedEvent
+  | AgentErrorEvent
+
+export interface AssistantDeltaEvent {
+  type: "assistant.delta"
   id: string
-  type: "tool.started" | "tool.completed" | "tool.failed"
-  toolId: string
+  text: string
+  timestamp: number
+}
+
+export interface ToolStartedEvent {
+  type: "tool.started"
+  id: string
+  toolCallId: string
   name: string
   input?: string
+  timestamp: number
+}
+
+export interface ToolCompletedEvent {
+  type: "tool.completed"
+  id: string
+  toolCallId: string
+  name: string
   output?: string
   duration?: number
-  error?: string
   timestamp: number
 }
 
-export interface AgentEvent {
+export interface AgentCompletedEvent {
+  type: "agent.completed"
   id: string
-  type: "agent.started" | "agent.completed" | "agent.error"
-  error?: string
   timestamp: number
 }
 
-export interface MessageEvent {
+export interface AgentErrorEvent {
+  type: "agent.error"
   id: string
-  type: "user.message" | "assistant.delta" | "assistant.message.completed"
-  content?: string
-  text?: string
+  error: string
   timestamp: number
 }
-
-export type RuntimeEvent = ToolEvent | AgentEvent | MessageEvent
 
 export function generateEventId(): string {
   return crypto.randomUUID()

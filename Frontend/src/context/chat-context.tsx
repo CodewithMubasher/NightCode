@@ -1,11 +1,11 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from "react"
-import { type Chat, type Message, generateId, truncateTitle } from "@/types/chat"
+import { type Chat, type Message, type MessagePart, generateId, truncateTitle } from "@/types/message"
 
 interface ChatContextType {
   chats: Chat[]
   getChat: (id: string) => Chat | undefined
   createChat: (firstMessage: string) => string
-  addMessage: (chatId: string, message: Omit<Message, "id" | "timestamp">) => void
+  addMessage: (chatId: string, role: "user" | "assistant", parts: MessagePart[]) => void
 }
 
 const ChatContext = createContext<ChatContextType | null>(null)
@@ -29,10 +29,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     return id
   }, [])
 
-  const addMessage = useCallback((chatId: string, message: Omit<Message, "id" | "timestamp">) => {
+  const addMessage = useCallback((chatId: string, role: "user" | "assistant", parts: MessagePart[]) => {
     const newMessage: Message = {
-      ...message,
       id: generateId(),
+      role,
+      parts,
       timestamp: Date.now(),
     }
     setChats((prev) =>
