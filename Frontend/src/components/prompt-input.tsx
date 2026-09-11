@@ -152,7 +152,7 @@ export function PromptInput({ onSend, isInChat = false }: PromptInputProps) {
   }
 
   return (
-    <div className="flex h-full items-center justify-center p-4 -mt-24">
+    <div className="flex h-full items-center justify-center p-4 -mt-16">
       <div className="w-full max-w-[718px] flex flex-col items-center gap-5">
         <div className="flex items-center gap-2.5">
           <Eclipse className="size-7 text-primary" />

@@ -155,8 +155,8 @@ export function ChatView({ chatId }: ChatViewProps) {
   const isLive = phase !== "idle"
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-y-auto pt-4 pb-0">
+    <div className="flex flex-col h-full min-h-0">
+      <div className="flex-1 overflow-y-auto min-h-0 pt-4 pb-0 scrollbar-hide">
         <div className="mx-auto max-w-3xl space-y-4 px-4">
           {chat?.messages.length === 0 && !isLive && (
             <div className="flex items-center justify-center h-64 text-white/40">

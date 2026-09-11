@@ -142,11 +142,11 @@ export function App() {
         </SidebarFooter>
       </Sidebar>
       <SidebarInset
-        className="bg-cover bg-center bg-no-repeat"
+        className="relative flex flex-col h-screen overflow-hidden bg-cover bg-center bg-no-repeat bg-fixed"
         style={{ backgroundImage: isHome ? "url('/bg.png')" : "url('/bg2.png')" }}
       >
         {isHome && (
-          <div className="relative p-4" ref={workspaceRef}>
+          <div className="relative p-4 shrink-0" ref={workspaceRef}>
             <button
               onClick={() => setWorkspaceOpen(!workspaceOpen)}
               className="flex items-center gap-2 rounded-lg bg-white/0 px-3 py-1.5 text-sm text-white/70 cursor-pointer hover:bg-white/10"
@@ -181,7 +181,9 @@ export function App() {
             )}
           </div>
         )}
-        <Outlet />
+        <div className="flex-1 min-h-0">
+          <Outlet />
+        </div>
       </SidebarInset>
     </SidebarProvider>
   )
