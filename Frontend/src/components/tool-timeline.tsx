@@ -19,12 +19,10 @@ interface ToolTimelineProps {
   startCollapsed?: boolean
 }
 
-export function ToolTimeline({ isAgentStarted, isAgentCompleted, toolEvents, startCollapsed = false }: ToolTimelineProps) {
+export function ToolTimeline({ isAgentStarted, isAgentCompleted, toolEvents, startCollapsed = true }: ToolTimelineProps) {
   const [isExpanded, setIsExpanded] = useState(!startCollapsed)
   const userToggledRef = useRef(false)
 
-  // Auto-collapse the detail list once the agent finishes, unless the
-  // user has manually expanded/collapsed it themselves.
   useEffect(() => {
     if (!isAgentCompleted || userToggledRef.current) return
     const timer = setTimeout(() => setIsExpanded(false), 600)
@@ -60,18 +58,20 @@ export function ToolTimeline({ isAgentStarted, isAgentCompleted, toolEvents, sta
     : "Working..."
 
   return (
-    <div className="py-2">
+    <div>
       <button
         onClick={toggleExpanded}
-        className="flex items-center gap-1.5 text-white/70 cursor-pointer hover:text-white/90 transition-colors"
+        className="flex items-center gap-1.5 text-white/70 cursor-pointer hover:text-white/90"
       >
-        <span className="text-sm">{summary}</span>
+        <span className="text-[14px]">{summary}</span>
         <ChevronDown className={`size-3 text-white/50 transition-transform duration-200 ${isExpanded ? "" : "-rotate-90"}`} />
       </button>
 
-      <div className={`ml-1 mt-2 transition-all duration-300 ease-in-out overflow-hidden ${isExpanded ? "max-h-[400px] opacity-100" : "max-h-0 opacity-0"}`}>
-          {toolEvents.map((event) => {
+      <div className={`ml-1 grid transition-all duration-200 ease-in-out ${isExpanded ? "grid-rows-[1fr] opacity-100 mt-2 mb-3" : "grid-rows-[0fr] opacity-0"}`}>
+        <div className="overflow-hidden">
+          {toolEvents.map((event, index) => {
             const display = getToolDisplay(event)
+            const isLastEvent = index === toolEvents.length - 1
 
             return (
               <TimelineNode
@@ -81,22 +81,21 @@ export function ToolTimeline({ isAgentStarted, isAgentCompleted, toolEvents, sta
                 fileName={display.fileName}
                 linesRemoved={display.linesRemoved}
                 linesAdded={display.linesAdded}
-                isLast={false}
-                showLine={true}
+                isLast={isLastEvent && !isAgentCompleted}
+                showLine={!(isLastEvent && !isAgentCompleted)}
               />
             )
           })}
 
-        {isAgentCompleted && (
-          <div className="mt-1">
+          {isAgentCompleted && (
             <TimelineNode
               icon="check"
               label="Done ✓"
               isLast={true}
               showLine={false}
             />
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   )

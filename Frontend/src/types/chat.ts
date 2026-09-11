@@ -14,6 +14,7 @@ export interface Message {
   content: string
   timestamp: number
   toolEvents?: MessageToolEvent[]
+  initialText?: string
 }
 
 export interface Chat {
