@@ -1,5 +1,15 @@
-import { Eclipse, Plus, Paperclip, ArrowUp, Square, ShieldCheck, Zap, ShieldAlert, ChevronDown } from "lucide-react"
+import { Eclipse, Plus, Paperclip, ArrowUp, Square, ShieldCheck, Zap, ShieldAlert, ChevronDown, FileCodeIcon, XIcon } from "lucide-react"
 import { useState, useRef, useEffect, type KeyboardEvent } from "react"
+import {
+  Attachment,
+  AttachmentMedia,
+  AttachmentContent,
+  AttachmentTitle,
+  AttachmentDescription,
+  AttachmentActions,
+  AttachmentAction,
+} from "@/components/ui/attachment"
+import type { AttachmentPart } from "@/types/message"
 
 const options = [
   { value: "readonly", label: "Read Only", icon: ShieldCheck },
@@ -15,8 +25,62 @@ const models = [
   { value: "gemini-1.5-pro", label: "Gemini 1.5 Pro" },
 ]
 
+const ACCEPTED_EXTENSIONS = new Set([
+  ".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs", ".java", ".c", ".cpp",
+  ".cs", ".rb", ".php", ".swift", ".kt", ".scala", ".html", ".css", ".scss",
+  ".json", ".yaml", ".yml", ".toml", ".xml", ".sql", ".sh", ".bash", ".zsh",
+  ".md", ".txt", ".env", ".gitignore", ".dockerfile", ".vue", ".svelte",
+])
+
+const IMAGE_MIMES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml"])
+
+const MAX_FILE_SIZE = 10 * 1024 * 1024
+
+function isAcceptedFile(file: File): boolean {
+  if (IMAGE_MIMES.has(file.type)) return true
+  const ext = "." + file.name.split(".").pop()?.toLowerCase()
+  return ACCEPTED_EXTENSIONS.has(ext)
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
+
+function readFileAsText(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = reject
+    reader.readAsText(file)
+  })
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function getFileExtension(name: string): string {
+  const ext = name.split(".").pop()?.toLowerCase() ?? ""
+  const map: Record<string, string> = {
+    ts: "TypeScript", tsx: "TypeScript", js: "JavaScript", jsx: "JavaScript",
+    py: "Python", go: "Go", rs: "Rust", java: "Java", c: "C", cpp: "C++",
+    cs: "C#", rb: "Ruby", php: "PHP", swift: "Swift", kt: "Kotlin",
+    html: "HTML", css: "CSS", scss: "SCSS", json: "JSON", yaml: "YAML",
+    yml: "YAML", xml: "XML", sql: "SQL", sh: "Shell", md: "Markdown",
+    txt: "Text", vue: "Vue", svelte: "Svelte",
+  }
+  return map[ext] ?? ext.toUpperCase()
+}
+
 interface PromptInputProps {
-  onSend?: (message: string) => void
+  onSend?: (message: string, attachments: AttachmentPart[]) => void
   onCancel?: () => void
   isInChat?: boolean
   isGenerating?: boolean
@@ -28,9 +92,11 @@ export function PromptInput({ onSend, onCancel, isInChat = false, isGenerating =
   const [open, setOpen] = useState(false)
   const [selectedModel, setSelectedModel] = useState("")
   const [modelOpen, setModelOpen] = useState(false)
+  const [attachments, setAttachments] = useState<AttachmentPart[]>([])
   const ref = useRef<HTMLDivElement>(null)
   const modelRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const current = options.find((o) => o.value === selected)
 
@@ -47,10 +113,44 @@ export function PromptInput({ onSend, onCancel, isInChat = false, isGenerating =
     return () => document.removeEventListener("mousedown", handleClickOutside)
   }, [])
 
+  const handleFiles = async (files: FileList | null) => {
+    if (!files) return
+    const newAttachments: AttachmentPart[] = []
+
+    for (const file of Array.from(files)) {
+      if (!isAcceptedFile(file)) continue
+      if (file.size > MAX_FILE_SIZE) continue
+
+      const isImage = IMAGE_MIMES.has(file.type)
+      const attachment: AttachmentPart = {
+        type: "attachment",
+        id: crypto.randomUUID(),
+        name: file.name,
+        size: file.size,
+        mime: file.type,
+      }
+
+      if (isImage) {
+        attachment.data = await readFileAsDataUrl(file)
+      } else {
+        attachment.content = await readFileAsText(file)
+      }
+
+      newAttachments.push(attachment)
+    }
+
+    setAttachments((prev) => [...prev, ...newAttachments])
+  }
+
+  const handleRemoveAttachment = (id: string) => {
+    setAttachments((prev) => prev.filter((a) => a.id !== id))
+  }
+
   const handleSend = () => {
-    if (!value.trim()) return
-    onSend?.(value.trim())
+    if (!value.trim() && attachments.length === 0) return
+    onSend?.(value.trim(), attachments)
     setValue("")
+    setAttachments([])
     textareaRef.current?.focus()
   }
 
@@ -61,11 +161,159 @@ export function PromptInput({ onSend, onCancel, isInChat = false, isGenerating =
     }
   }
 
+  const renderAttachments = () => {
+    if (attachments.length === 0) return null
+
+    const images = attachments.filter((a) => a.data)
+    const files = attachments.filter((a) => !a.data)
+
+    return (
+      <div className="flex flex-col gap-3 mb-3">
+        {images.length > 0 && (
+          <div className="grid grid-cols-4 gap-2">
+            {images.map((att) => (
+              <Attachment key={att.id} orientation="vertical" className="w-full">
+                <AttachmentMedia variant="image" className="aspect-square size-20">
+                  <img src={att.data} alt={att.name} className="size-full object-cover rounded-lg" />
+                </AttachmentMedia>
+                <AttachmentContent>
+                  <AttachmentTitle>{att.name}</AttachmentTitle>
+                  <AttachmentDescription>
+                    {att.mime.split("/")[1]?.toUpperCase()} · {formatFileSize(att.size)}
+                  </AttachmentDescription>
+                </AttachmentContent>
+                <AttachmentActions>
+                  <AttachmentAction onClick={() => handleRemoveAttachment(att.id)}>
+                    <XIcon />
+                  </AttachmentAction>
+                </AttachmentActions>
+              </Attachment>
+            ))}
+          </div>
+        )}
+        {files.map((att) => (
+          <Attachment key={att.id} className="w-full">
+            <AttachmentMedia>
+              <FileCodeIcon />
+            </AttachmentMedia>
+            <AttachmentContent>
+              <AttachmentTitle>{att.name}</AttachmentTitle>
+              <AttachmentDescription>
+                {getFileExtension(att.name)} · {formatFileSize(att.size)}
+              </AttachmentDescription>
+            </AttachmentContent>
+            <AttachmentActions>
+              <AttachmentAction onClick={() => handleRemoveAttachment(att.id)}>
+                <XIcon />
+              </AttachmentAction>
+            </AttachmentActions>
+          </Attachment>
+        ))}
+      </div>
+    )
+  }
+
+  const renderActions = () => (
+    <div className="flex items-center justify-between mt-3">
+      <div className="flex items-center gap-2.5">
+        <button className="flex size-7 items-center justify-center rounded-full bg-white/5 text-white cursor-pointer">
+          <Plus className="size-4" />
+        </button>
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          className="flex size-7 items-center justify-center rounded-full bg-white/5 text-white cursor-pointer hover:bg-white/10 transition-colors"
+        >
+          <Paperclip className="size-4" />
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept={[...IMAGE_MIMES].join(",") + "," + [...ACCEPTED_EXTENSIONS].join(",")}
+          onChange={(e) => handleFiles(e.target.files)}
+          className="hidden"
+        />
+        <div ref={ref} className="relative">
+          <button
+            onClick={() => setOpen(!open)}
+            className="flex h-7 items-center gap-1.5 rounded-full border-transparent bg-white/0 px-2.5 text-white/70 text-xs cursor-pointer hover:bg-white/10"
+          >
+            {current && <current.icon className="size-3.5" />}
+            <span>{current?.label}</span>
+            <ChevronDown className={`size-3.5 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
+          </button>
+          {open && (
+            <div className="absolute bottom-full left-0 mb-1 w-36 rounded-xl border border-white/10 bg-neutral-900 shadow-lg overflow-hidden z-50">
+              {options.map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => {
+                    setSelected(opt.value)
+                    setOpen(false)
+                  }}
+                  className={`flex w-full items-center gap-2 px-3 py-1.5 text-xs text-white hover:bg-white/10 cursor-pointer ${selected === opt.value ? "bg-white/5" : ""}`}
+                >
+                  <opt.icon className="size-3.5" />
+                  <span>{opt.label}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <div ref={modelRef} className="relative">
+          <button
+            onClick={() => setModelOpen(!modelOpen)}
+            className="flex h-7 items-center gap-1.5 rounded-full bg-white/0 px-2.5 text-white/70 text-xs cursor-pointer hover:bg-white/10"
+          >
+            <span>{selectedModel || "Select model"}</span>
+            <ChevronDown className={`size-3.5 transition-transform duration-200 ${modelOpen ? "rotate-180" : ""}`} />
+          </button>
+          {modelOpen && (
+            <div className="absolute bottom-full right-0 mb-1 w-52 rounded-xl border border-white/10 bg-neutral-900 shadow-lg overflow-hidden z-50">
+              <div className="px-3 py-1.5 text-[10px] font-medium text-white/40 uppercase tracking-wider">Google</div>
+              {models.map((model) => (
+                <button
+                  key={model.value}
+                  onClick={() => {
+                    setSelectedModel(model.label)
+                    setModelOpen(false)
+                  }}
+                  className={`flex w-full items-center gap-2 px-3 py-1.5 text-xs text-white hover:bg-white/10 cursor-pointer ${selectedModel === model.label ? "bg-white/5" : ""}`}
+                >
+                  <span>{model.label}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        {isGenerating ? (
+          <button
+            onClick={onCancel}
+            className="flex size-9 items-center justify-center rounded-full bg-white/10 text-white transition-opacity hover:bg-white/20 cursor-pointer"
+          >
+            <Square className="size-4" />
+          </button>
+        ) : (
+          <button
+            onClick={handleSend}
+            disabled={!value.trim() && attachments.length === 0}
+            className="flex size-9 items-center justify-center rounded-full bg-primary text-primary-foreground transition-opacity disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+          >
+            <ArrowUp className="size-5" />
+          </button>
+        )}
+      </div>
+    </div>
+  )
+
   if (isInChat) {
     return (
       <div className="w-full p-4">
         <div className="mx-auto max-w-3xl">
           <div className="rounded-2xl border border-white/10 border-l-2 border-l-primary bg-white/10 backdrop-blur-[1px] px-4 pt-4 pb-2 shadow-sm">
+            {renderAttachments()}
             <textarea
               ref={textareaRef}
               value={value}
@@ -75,87 +323,7 @@ export function PromptInput({ onSend, onCancel, isInChat = false, isGenerating =
               rows={2}
               className="px-1 w-full resize-none bg-transparent text-sm text-white placeholder:text-white/50 outline-none"
             />
-            <div className="flex items-center justify-between mt-3">
-              <div className="flex items-center gap-2.5">
-                <button className="flex size-7 items-center justify-center rounded-full bg-white/5 text-white cursor-pointer">
-                  <Plus className="size-4" />
-                </button>
-                <button className="flex size-7 items-center justify-center rounded-full bg-white/5 text-white cursor-pointer">
-                  <Paperclip className="size-4" />
-                </button>
-                <div ref={ref} className="relative">
-                  <button
-                    onClick={() => setOpen(!open)}
-                    className="flex h-7 items-center gap-1.5 rounded-full border-transparent bg-white/0 px-2.5 text-white/70 text-xs cursor-pointer hover:bg-white/10"
-                  >
-                    {current && <current.icon className="size-3.5" />}
-                    <span>{current?.label}</span>
-                    <ChevronDown className={`size-3.5 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
-                  </button>
-                  {open && (
-                    <div className="absolute bottom-full left-0 mb-1 w-36 rounded-xl border border-white/10 bg-neutral-900 shadow-lg overflow-hidden">
-                      {options.map((opt) => (
-                        <button
-                          key={opt.value}
-                          onClick={() => {
-                            setSelected(opt.value)
-                            setOpen(false)
-                          }}
-                          className={`flex w-full items-center gap-2 px-3 py-1.5 text-xs text-white hover:bg-white/10 cursor-pointer ${selected === opt.value ? "bg-white/5" : ""}`}
-                        >
-                          <opt.icon className="size-3.5" />
-                          <span>{opt.label}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <div ref={modelRef} className="relative">
-                  <button
-                    onClick={() => setModelOpen(!modelOpen)}
-                    className="flex h-7 items-center gap-1.5 rounded-full bg-white/0 px-2.5 text-white/70 text-xs cursor-pointer hover:bg-white/10"
-                  >
-                    <span>{selectedModel || "Select model"}</span>
-                    <ChevronDown className={`size-3.5 transition-transform duration-200 ${modelOpen ? "rotate-180" : ""}`} />
-                  </button>
-                  {modelOpen && (
-                    <div className="absolute bottom-full right-0 mb-1 w-52 rounded-xl border border-white/10 bg-neutral-900 shadow-lg overflow-hidden">
-                      <div className="px-3 py-1.5 text-[10px] font-medium text-white/40 uppercase tracking-wider">Google</div>
-                      {models.map((model) => (
-                        <button
-                          key={model.value}
-                          onClick={() => {
-                            setSelectedModel(model.label)
-                            setModelOpen(false)
-                          }}
-                          className={`flex w-full items-center gap-2 px-3 py-1.5 text-xs text-white hover:bg-white/10 cursor-pointer ${selectedModel === model.label ? "bg-white/5" : ""}`}
-                        >
-                          <span>{model.label}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                {isGenerating ? (
-                  <button
-                    onClick={onCancel}
-                    className="flex size-9 items-center justify-center rounded-full bg-white/10 text-white transition-opacity hover:bg-white/20 cursor-pointer"
-                  >
-                    <Square className="size-4" />
-                  </button>
-                ) : (
-                  <button
-                    onClick={handleSend}
-                    disabled={!value.trim()}
-                    className="flex size-9 items-center justify-center rounded-full bg-primary text-primary-foreground transition-opacity disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-                  >
-                    <ArrowUp className="size-5" />
-                  </button>
-                )}
-              </div>
-            </div>
+            {renderActions()}
           </div>
         </div>
       </div>
@@ -170,6 +338,7 @@ export function PromptInput({ onSend, onCancel, isInChat = false, isGenerating =
           <h1 className="text-2xl font-medium">What can I do for you?</h1>
         </div>
         <div className="w-full rounded-2xl border border-white/10 border-l-2 border-l-primary bg-white/5 backdrop-blur-[2px] px-4 pt-4 pb-2 shadow-sm">
+          {renderAttachments()}
           <textarea
             ref={textareaRef}
             value={value}
@@ -179,78 +348,7 @@ export function PromptInput({ onSend, onCancel, isInChat = false, isGenerating =
             rows={2}
             className="px-1 w-full resize-none bg-transparent text-sm text-white placeholder:text-white/50 outline-none"
           />
-          <div className="flex items-center justify-between mt-3">
-            <div className="flex items-center gap-2.5">
-              <button className="flex size-7 items-center justify-center rounded-full bg-white/5 text-white cursor-pointer">
-                <Plus className="size-4" />
-              </button>
-              <button className="flex size-7 items-center justify-center rounded-full bg-white/5 text-white cursor-pointer">
-                <Paperclip className="size-4" />
-              </button>
-              <div ref={ref} className="relative">
-                <button
-                  onClick={() => setOpen(!open)}
-                  className="flex h-7 items-center gap-1.5 rounded-full border-transparent bg-white/0 px-2.5 text-white/70 text-xs cursor-pointer hover:bg-white/10"
-                >
-                  {current && <current.icon className="size-3.5" />}
-                  <span>{current?.label}</span>
-                  <ChevronDown className={`size-3.5 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
-                </button>
-                {open && (
-                  <div className="absolute bottom-full left-0 mb-1 w-36 rounded-xl border border-white/10 bg-neutral-900 shadow-lg overflow-hidden">
-                    {options.map((opt) => (
-                      <button
-                        key={opt.value}
-                        onClick={() => {
-                          setSelected(opt.value)
-                          setOpen(false)
-                        }}
-                        className={`flex w-full items-center gap-2 px-3 py-1.5 text-xs text-white hover:bg-white/10 cursor-pointer ${selected === opt.value ? "bg-white/5" : ""}`}
-                      >
-                        <opt.icon className="size-3.5" />
-                        <span>{opt.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <div ref={modelRef} className="relative">
-                <button
-                  onClick={() => setModelOpen(!modelOpen)}
-                  className="flex h-7 items-center gap-1.5 rounded-full bg-white/0 px-2.5 text-white/70 text-xs cursor-pointer hover:bg-white/10"
-                >
-                  <span>{selectedModel || "Select model"}</span>
-                  <ChevronDown className={`size-3.5 transition-transform duration-200 ${modelOpen ? "rotate-180" : ""}`} />
-                </button>
-                {modelOpen && (
-                  <div className="absolute bottom-full right-0 mb-1 w-52 rounded-xl border border-white/10 bg-neutral-900 shadow-lg overflow-hidden">
-                    <div className="px-3 py-1.5 text-[10px] font-medium text-white/40 uppercase tracking-wider">Google</div>
-                    {models.map((model) => (
-                      <button
-                        key={model.value}
-                        onClick={() => {
-                          setSelectedModel(model.label)
-                          setModelOpen(false)
-                        }}
-                        className={`flex w-full items-center gap-2 px-3 py-1.5 text-xs text-white hover:bg-white/10 cursor-pointer ${selectedModel === model.label ? "bg-white/5" : ""}`}
-                      >
-                        <span>{model.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <button
-                onClick={handleSend}
-                disabled={!value.trim()}
-                className="flex size-9 items-center justify-center rounded-full bg-primary text-primary-foreground transition-opacity disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-              >
-                <ArrowUp className="size-5" />
-              </button>
-            </div>
-          </div>
+          {renderActions()}
         </div>
       </div>
     </div>

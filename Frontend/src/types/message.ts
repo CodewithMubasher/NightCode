@@ -26,7 +26,17 @@ export interface ArtifactPart {
   content: string
 }
 
-export type MessagePart = TextPart | ToolCallPart | ToolResultPart | ArtifactPart
+export interface AttachmentPart {
+  type: "attachment"
+  id: string
+  name: string
+  size: number
+  mime: string
+  data?: string
+  content?: string
+}
+
+export type MessagePart = TextPart | ToolCallPart | ToolResultPart | ArtifactPart | AttachmentPart
 
 export interface Message {
   id: string

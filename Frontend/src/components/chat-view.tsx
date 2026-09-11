@@ -11,9 +11,18 @@ import {
   MessageScrollerItem,
   MessageScrollerButton,
 } from "@/components/ui/message-scroller"
-import { Eclipse, Copy, ThumbsUp, ThumbsDown, RotateCcw } from "lucide-react"
+import { Eclipse, Copy, ThumbsUp, ThumbsDown, RotateCcw, FileCodeIcon } from "lucide-react"
 import { emitFakeRuntime } from "@/lib/runtime"
 import type { RuntimeEvent } from "@/types/events"
+import type { AttachmentPart } from "@/types/message"
+import {
+  Attachment,
+  AttachmentMedia,
+  AttachmentContent,
+  AttachmentTitle,
+  AttachmentDescription,
+  AttachmentGroup,
+} from "@/components/ui/attachment"
 
 interface ChatViewProps {
   chatId: string
@@ -32,6 +41,67 @@ function formatTimestamp(ts: number): string {
 
   if (isToday) return `Today ${time}`
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric" }) + " " + time
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function getFileExtension(name: string): string {
+  const ext = name.split(".").pop()?.toLowerCase() ?? ""
+  const map: Record<string, string> = {
+    ts: "TypeScript", tsx: "TypeScript", js: "JavaScript", jsx: "JavaScript",
+    py: "Python", go: "Go", rs: "Rust", java: "Java", c: "C", cpp: "C++",
+    cs: "C#", rb: "Ruby", php: "PHP", swift: "Swift", kt: "Kotlin",
+    html: "HTML", css: "CSS", scss: "SCSS", json: "JSON", yaml: "YAML",
+    yml: "YAML", xml: "XML", sql: "SQL", sh: "Shell", md: "Markdown",
+    txt: "Text", vue: "Vue", svelte: "Svelte",
+  }
+  return map[ext] ?? ext.toUpperCase()
+}
+
+function UserAttachments({ attachments }: { attachments: AttachmentPart[] }) {
+  if (attachments.length === 0) return null
+
+  const images = attachments.filter((a) => a.data)
+  const files = attachments.filter((a) => !a.data)
+
+  return (
+    <div className="flex flex-col gap-3 mb-2 items-end">
+      {images.length > 0 && (
+        <AttachmentGroup>
+          {images.map((att) => (
+            <Attachment key={att.id} orientation="vertical">
+              <AttachmentMedia variant="image">
+                <img src={att.data} alt={att.name} />
+              </AttachmentMedia>
+              <AttachmentContent>
+                <AttachmentTitle>{att.name}</AttachmentTitle>
+                <AttachmentDescription>
+                  {att.mime.split("/")[1]?.toUpperCase()} · {formatFileSize(att.size)}
+                </AttachmentDescription>
+              </AttachmentContent>
+            </Attachment>
+          ))}
+        </AttachmentGroup>
+      )}
+      {files.map((att) => (
+        <Attachment key={att.id} className="w-full">
+          <AttachmentMedia>
+            <FileCodeIcon />
+          </AttachmentMedia>
+          <AttachmentContent>
+            <AttachmentTitle>{att.name}</AttachmentTitle>
+            <AttachmentDescription>
+              {getFileExtension(att.name)} · {formatFileSize(att.size)}
+            </AttachmentDescription>
+          </AttachmentContent>
+        </Attachment>
+      ))}
+    </div>
+  )
 }
 
 interface ToolEvent {
@@ -216,14 +286,18 @@ export function ChatView({ chatId }: ChatViewProps) {
   const summaryTextRef = useRef("")
   const toolEventsRef = useRef<ToolEvent[]>([])
 
-  const handleSend = useCallback((message: string) => {
+  const handleSend = useCallback((message: string, attachments: AttachmentPart[] = []) => {
     if (cleanupRef.current) {
       cleanupRef.current()
       cleanupRef.current = null
     }
 
     hasTriggeredRef.current = true
-    addMessage(chatId, "user", [{ type: "text", text: message }])
+    const parts = [
+      ...(attachments.length > 0 ? attachments : []),
+      ...(message ? [{ type: "text" as const, text: message }] : []),
+    ]
+    addMessage(chatId, "user", parts)
 
     startRuntime(message)
   }, [chatId, addMessage, startRuntime])
@@ -366,10 +440,15 @@ export function ChatView({ chatId }: ChatViewProps) {
                           </div>
                         </div>
                       ) : (
-                        <div className="rounded-2xl px-4 py-2 bg-primary text-primary-foreground">
-                          <p className="whitespace-pre-wrap">
-                            {msg.parts.filter((p) => p.type === "text").map((p) => p.text).join("")}
-                          </p>
+                        <div className="flex flex-col items-end gap-1">
+                          <UserAttachments
+                            attachments={msg.parts.filter((p): p is AttachmentPart => p.type === "attachment")}
+                          />
+                          <div className="rounded-2xl px-4 py-2 bg-primary text-primary-foreground">
+                            <p className="whitespace-pre-wrap">
+                              {msg.parts.filter((p) => p.type === "text").map((p) => p.text).join("")}
+                            </p>
+                          </div>
                         </div>
                       )}
                     </div>
