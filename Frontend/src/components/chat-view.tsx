@@ -3,6 +3,14 @@ import { useChats } from "@/context/chat-context"
 import { PromptInput } from "@/components/prompt-input"
 import { ToolTimeline } from "@/components/tool-timeline"
 import { MarkdownRenderer } from "@/components/markdown-renderer"
+import {
+  MessageScrollerProvider,
+  MessageScroller,
+  MessageScrollerViewport,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerButton,
+} from "@/components/ui/message-scroller"
 import { Eclipse, Copy, ThumbsUp, ThumbsDown, RotateCcw } from "lucide-react"
 import { emitFakeRuntime } from "@/lib/runtime"
 import type { RuntimeEvent } from "@/types/events"
@@ -43,7 +51,6 @@ type Phase = "idle" | "typing-initial" | "showing-timeline" | "typing-summary" |
 export function ChatView({ chatId }: ChatViewProps) {
   const { getChat, addMessage } = useChats()
   const chat = getChat(chatId)
-  const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const [events, setEvents] = useState<RuntimeEvent[]>([])
   const [initialText, setInitialText] = useState("")
@@ -109,10 +116,6 @@ export function ChatView({ chatId }: ChatViewProps) {
     if (readCount > 0) return `Read ${readCount} file${readCount > 1 ? "s" : ""}`
     return "Done"
   })()
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [chat?.messages, phase, initialText, summaryText, errorText, toolEvents])
 
   useEffect(() => {
     if (!chat || hasTriggeredRef.current) return
@@ -256,150 +259,164 @@ export function ChatView({ chatId }: ChatViewProps) {
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      <div className="flex-1 overflow-y-auto min-h-0 pt-4 pb-0 scrollbar-hide">
-        <div className="mx-auto max-w-3xl space-y-4 px-4">
-          {chat?.messages.length === 0 && !isLive && (
-            <div className="flex items-center justify-center h-64 text-white/40">
-              <p>Start a conversation...</p>
-            </div>
-          )}
-          {chat && chat.messages.length > 0 && (
-            <div className="text-center text-xs text-white/40 pb-2">
-              {formatTimestamp(chat.createdAt)}
-            </div>
-          )}
-
-          {chat?.messages.map((msg) => (
-            <div
-              key={msg.id}
-              className={`${msg.role === "user" ? "flex justify-end" : "flex justify-start gap-2 group relative"}`}
-            >
-              {msg.role === "assistant" && (
-                <div className="flex-shrink-0">
-                  <Eclipse className="size-6 text-primary" />
-                </div>
+      <MessageScrollerProvider autoScroll scrollEdgeThreshold={80} scrollPreviousItemPeek={120}>
+        <MessageScroller>
+          <MessageScrollerViewport preserveScrollOnPrepend className="pt-4 pb-0 scrollbar-hide">
+            <MessageScrollerContent className="mx-auto max-w-3xl space-y-4 px-4 gap-4">
+              {chat?.messages.length === 0 && !isLive && (
+                <MessageScrollerItem messageId="empty-state">
+                  <div className="flex items-center justify-center h-64 text-white/40">
+                    <p>Start a conversation...</p>
+                  </div>
+                </MessageScrollerItem>
               )}
-              <div className={`max-w-[80%] ${msg.role === "assistant" ? "flex-1 min-w-0" : ""}`}>
-                {msg.role === "assistant" ? (
-                  <div className="flex flex-col gap-1 ml-1">
-                    {(() => {
-                      const textParts = msg.parts.filter((p) => p.type === "text")
-                      const hasTools = msg.parts.some((p) => p.type === "tool-call")
-                      const toolEventsForTimeline = msg.parts
-                        .filter((p) => p.type === "tool-call" || p.type === "tool-result")
-                        .reduce((acc, part) => {
-                          if (part.type === "tool-call") {
-                            acc.push({
-                              id: part.toolCallId,
-                              toolCallId: part.toolCallId,
-                              type: "tool.started" as const,
-                              name: part.name,
-                              input: part.input,
-                              timestamp: 0,
-                            })
-                          } else if (part.type === "tool-result") {
-                            const existing = acc.find((e) => e.toolCallId === part.toolCallId)
-                            if (existing) {
-                              if (part.error) {
-                                existing.type = "tool.failed"
-                                existing.error = part.error
-                              } else {
-                                existing.type = "tool.completed"
-                              }
-                            }
-                          }
-                          return acc
-                        }, [] as ToolEvent[])
+              {chat && chat.messages.length > 0 && (
+                <MessageScrollerItem messageId="timestamp-divider">
+                  <div className="text-center text-xs text-white/40 pb-2">
+                    {formatTimestamp(chat.createdAt)}
+                  </div>
+                </MessageScrollerItem>
+              )}
 
-                      return (
-                        <>
-                          {textParts[0] && (
-                            <MarkdownRenderer content={textParts[0].text} />
-                          )}
-                          {hasTools && (
-                            <ToolTimeline
-                              isAgentStarted={true}
-                              isAgentCompleted={true}
-                              toolEvents={toolEventsForTimeline}
-                              summary={(() => {
-                                const failed = toolEventsForTimeline.filter((e) => e.type === "tool.failed").length
-                                const success = toolEventsForTimeline.length - failed
-                                if (failed > 0 && success === 0) return `Failed (${failed})`
-                                if (failed > 0 && success > 0) return `${success} done, ${failed} failed`
-                                if (toolEventsForTimeline.some((e) => e.name === "edit_file")) return `Edit ${success} file${success > 1 ? "s" : ""}`
-                                return `Read ${success} file${success > 1 ? "s" : ""}`
-                              })()}
-                            />
-                          )}
-                          {textParts[1] && (
-                            <MarkdownRenderer content={textParts[1].text} />
-                          )}
-                        </>
-                      )
-                    })()}
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity -ml-1 mt-1">
-                      <button className="p-1.5 rounded-md text-white/40 hover:text-white/70 hover:bg-white/5 transition-colors cursor-pointer">
-                        <Copy className="size-3.5" />
-                      </button>
-                      <button className="p-1.5 rounded-md text-white/40 hover:text-white/70 hover:bg-white/5 transition-colors cursor-pointer">
-                        <ThumbsUp className="size-3.5" />
-                      </button>
-                      <button className="p-1.5 rounded-md text-white/40 hover:text-white/70 hover:bg-white/5 transition-colors cursor-pointer">
-                        <ThumbsDown className="size-3.5" />
-                      </button>
-                      <button className="p-1.5 rounded-md text-white/40 hover:text-white/70 hover:bg-white/5 transition-colors cursor-pointer">
-                        <RotateCcw className="size-3.5" />
-                      </button>
+              {chat?.messages.map((msg) => (
+                <MessageScrollerItem
+                  key={msg.id}
+                  messageId={msg.id}
+                  scrollAnchor={msg.role === "user"}
+                >
+                  <div
+                    className={`${msg.role === "user" ? "flex justify-end" : "flex justify-start gap-2 group relative"}`}
+                  >
+                    {msg.role === "assistant" && (
+                      <div className="flex-shrink-0">
+                        <Eclipse className="size-6 text-primary" />
+                      </div>
+                    )}
+                    <div className={`max-w-[80%] ${msg.role === "assistant" ? "flex-1 min-w-0" : ""}`}>
+                      {msg.role === "assistant" ? (
+                        <div className="flex flex-col gap-1 ml-1">
+                          {(() => {
+                            const textParts = msg.parts.filter((p) => p.type === "text")
+                            const hasTools = msg.parts.some((p) => p.type === "tool-call")
+                            const toolEventsForTimeline = msg.parts
+                              .filter((p) => p.type === "tool-call" || p.type === "tool-result")
+                              .reduce((acc, part) => {
+                                if (part.type === "tool-call") {
+                                  acc.push({
+                                    id: part.toolCallId,
+                                    toolCallId: part.toolCallId,
+                                    type: "tool.started" as const,
+                                    name: part.name,
+                                    input: part.input,
+                                    timestamp: 0,
+                                  })
+                                } else if (part.type === "tool-result") {
+                                  const existing = acc.find((e) => e.toolCallId === part.toolCallId)
+                                  if (existing) {
+                                    if (part.error) {
+                                      existing.type = "tool.failed"
+                                      existing.error = part.error
+                                    } else {
+                                      existing.type = "tool.completed"
+                                    }
+                                  }
+                                }
+                                return acc
+                              }, [] as ToolEvent[])
+
+                            return (
+                              <>
+                                {textParts[0] && (
+                                  <MarkdownRenderer content={textParts[0].text} />
+                                )}
+                                {hasTools && (
+                                  <ToolTimeline
+                                    isAgentStarted={true}
+                                    isAgentCompleted={true}
+                                    toolEvents={toolEventsForTimeline}
+                                    summary={(() => {
+                                      const failed = toolEventsForTimeline.filter((e) => e.type === "tool.failed").length
+                                      const success = toolEventsForTimeline.length - failed
+                                      if (failed > 0 && success === 0) return `Failed (${failed})`
+                                      if (failed > 0 && success > 0) return `${success} done, ${failed} failed`
+                                      if (toolEventsForTimeline.some((e) => e.name === "edit_file")) return `Edit ${success} file${success > 1 ? "s" : ""}`
+                                      return `Read ${success} file${success > 1 ? "s" : ""}`
+                                    })()}
+                                  />
+                                )}
+                                {textParts[1] && (
+                                  <MarkdownRenderer content={textParts[1].text} />
+                                )}
+                              </>
+                            )
+                          })()}
+                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity -ml-1 mt-1">
+                            <button className="p-1.5 rounded-md text-white/40 hover:text-white/70 hover:bg-white/5 transition-colors cursor-pointer">
+                              <Copy className="size-3.5" />
+                            </button>
+                            <button className="p-1.5 rounded-md text-white/40 hover:text-white/70 hover:bg-white/5 transition-colors cursor-pointer">
+                              <ThumbsUp className="size-3.5" />
+                            </button>
+                            <button className="p-1.5 rounded-md text-white/40 hover:text-white/70 hover:bg-white/5 transition-colors cursor-pointer">
+                              <ThumbsDown className="size-3.5" />
+                            </button>
+                            <button className="p-1.5 rounded-md text-white/40 hover:text-white/70 hover:bg-white/5 transition-colors cursor-pointer">
+                              <RotateCcw className="size-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="rounded-2xl px-4 py-2 bg-primary text-primary-foreground">
+                          <p className="whitespace-pre-wrap">
+                            {msg.parts.filter((p) => p.type === "text").map((p) => p.text).join("")}
+                          </p>
+                        </div>
+                      )}
                     </div>
                   </div>
-                ) : (
-                  <div className="rounded-2xl px-4 py-2 bg-primary text-primary-foreground">
-                    <p className="whitespace-pre-wrap">
-                      {msg.parts.filter((p) => p.type === "text").map((p) => p.text).join("")}
-                    </p>
+                </MessageScrollerItem>
+              ))}
+
+              {isLive && (
+                <MessageScrollerItem messageId="live-streaming">
+                  <div className="flex justify-start gap-2 items-start">
+                    <div className="flex-shrink-0">
+                      <Eclipse className="size-6 text-primary" />
+                    </div>
+                    <div className="max-w-[80%] flex-1 min-w-0">
+                      <div className="flex flex-col gap-1 ml-1">
+                        {(isTypingInitial || initialText) && (
+                          <MarkdownRenderer content={initialText} isStreaming />
+                        )}
+
+                        {showTimeline && (
+                          <ToolTimeline
+                            isAgentStarted={true}
+                            isAgentCompleted={hasAgentCompleted}
+                            toolEvents={toolEvents}
+                            summary={toolSummary}
+                          />
+                        )}
+
+                        {(isTypingSummary || summaryText) && (
+                          <MarkdownRenderer content={summaryText} isStreaming />
+                        )}
+
+                        {isError && errorText && (
+                          <p className="text-red-400/80 whitespace-pre-wrap leading-6">
+                            {errorText}
+                          </p>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                )}
-              </div>
-            </div>
-          ))}
-
-          {isLive && (
-            <div className="flex justify-start gap-2 items-start">
-              <div className="flex-shrink-0">
-                <Eclipse className="size-6 text-primary" />
-              </div>
-              <div className="max-w-[80%] flex-1 min-w-0">
-                <div className="flex flex-col gap-1 ml-1">
-                  {(isTypingInitial || initialText) && (
-                    <MarkdownRenderer content={initialText} isStreaming />
-                  )}
-
-                  {showTimeline && (
-                    <ToolTimeline
-                      isAgentStarted={true}
-                      isAgentCompleted={hasAgentCompleted}
-                      toolEvents={toolEvents}
-                      summary={toolSummary}
-                    />
-                  )}
-
-                  {(isTypingSummary || summaryText) && (
-                    <MarkdownRenderer content={summaryText} isStreaming />
-                  )}
-
-                  {isError && errorText && (
-                    <p className="text-red-400/80 whitespace-pre-wrap leading-6">
-                      {errorText}
-                    </p>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div ref={messagesEndRef} />
-        </div>
-      </div>
+                </MessageScrollerItem>
+              )}
+            </MessageScrollerContent>
+          </MessageScrollerViewport>
+          <MessageScrollerButton direction="end" />
+        </MessageScroller>
+      </MessageScrollerProvider>
       <PromptInput
         onSend={handleSend}
         onCancel={handleCancel}
