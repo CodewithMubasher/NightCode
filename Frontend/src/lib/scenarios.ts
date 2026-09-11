@@ -26,7 +26,7 @@ function typeText(
       clearInterval(typeInterval)
       onDone()
     }
-  }, 20)
+  }, 7)
   return () => { cancelled = true; clearInterval(typeInterval) }
 }
 

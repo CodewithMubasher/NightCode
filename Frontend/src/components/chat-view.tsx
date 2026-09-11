@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react"
 import { useChats } from "@/context/chat-context"
 import { PromptInput } from "@/components/prompt-input"
 import { ToolTimeline } from "@/components/tool-timeline"
+import { MarkdownRenderer } from "@/components/markdown-renderer"
 import { Eclipse, Copy, ThumbsUp, ThumbsDown, RotateCcw } from "lucide-react"
 import { emitFakeRuntime } from "@/lib/runtime"
 import type { RuntimeEvent } from "@/types/events"
@@ -313,9 +314,7 @@ export function ChatView({ chatId }: ChatViewProps) {
                       return (
                         <>
                           {textParts[0] && (
-                            <p className="text-white/80 whitespace-pre-wrap leading-6">
-                              {textParts[0].text}
-                            </p>
+                            <MarkdownRenderer content={textParts[0].text} />
                           )}
                           {hasTools && (
                             <ToolTimeline
@@ -333,9 +332,7 @@ export function ChatView({ chatId }: ChatViewProps) {
                             />
                           )}
                           {textParts[1] && (
-                            <p className="text-white/80 whitespace-pre-wrap leading-6">
-                              {textParts[1].text}
-                            </p>
+                            <MarkdownRenderer content={textParts[1].text} />
                           )}
                         </>
                       )
@@ -374,9 +371,7 @@ export function ChatView({ chatId }: ChatViewProps) {
               <div className="max-w-[80%] flex-1 min-w-0">
                 <div className="flex flex-col gap-1 ml-1">
                   {(isTypingInitial || initialText) && (
-                    <p className="text-white/90 whitespace-pre-wrap leading-6">
-                      {initialText}
-                    </p>
+                    <MarkdownRenderer content={initialText} isStreaming />
                   )}
 
                   {showTimeline && (
@@ -389,9 +384,7 @@ export function ChatView({ chatId }: ChatViewProps) {
                   )}
 
                   {(isTypingSummary || summaryText) && (
-                    <p className="text-white/90 whitespace-pre-wrap leading-6">
-                      {summaryText}
-                    </p>
+                    <MarkdownRenderer content={summaryText} isStreaming />
                   )}
 
                   {isError && errorText && (
