@@ -12,18 +12,11 @@ import {
   MessageScrollerItem,
   MessageScrollerButton,
 } from "@/components/ui/message-scroller"
-import { Eclipse, Copy, ThumbsUp, ThumbsDown, RotateCcw, FileCodeIcon, FileText } from "lucide-react"
+import { Eclipse, Copy, ThumbsUp, ThumbsDown, RotateCcw, FileText } from "lucide-react"
 import { emitFakeRuntime } from "@/lib/runtime"
 import type { RuntimeEvent, ArtifactCreatedEvent } from "@/types/events"
-import type { AttachmentPart, TurnSegment, ToolCallEntry, ArtifactPart } from "@/types/message"
-import {
-  Attachment,
-  AttachmentMedia,
-  AttachmentContent,
-  AttachmentTitle,
-  AttachmentDescription,
-  AttachmentGroup,
-} from "@/components/ui/attachment"
+import type { AttachmentPart, TurnSegment, ToolCallEntry } from "@/types/message"
+import { AttachmentCard, isMarkdownFile } from "@/components/attachment-card"
 
 interface ChatViewProps {
   chatId: string
@@ -42,83 +35,6 @@ function formatTimestamp(ts: number): string {
 
   if (isToday) return `Today ${time}`
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric" }) + " " + time
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
-function getFileExtension(name: string): string {
-  const ext = name.split(".").pop()?.toLowerCase() ?? ""
-  const map: Record<string, string> = {
-    ts: "TypeScript", tsx: "TypeScript", js: "JavaScript", jsx: "JavaScript",
-    py: "Python", go: "Go", rs: "Rust", java: "Java", c: "C", cpp: "C++",
-    cs: "C#", rb: "Ruby", php: "PHP", swift: "Swift", kt: "Kotlin",
-    html: "HTML", css: "CSS", scss: "SCSS", json: "JSON", yaml: "YAML",
-    yml: "YAML", xml: "XML", sql: "SQL", sh: "Shell", md: "Markdown",
-    txt: "Text", vue: "Vue", svelte: "Svelte",
-  }
-  return map[ext] ?? ext.toUpperCase()
-}
-
-function UserAttachments({ attachments, onOpenArtifact }: { attachments: AttachmentPart[]; onOpenArtifact?: (name: string, content: string, type: "document" | "code", language?: string) => void }) {
-  if (attachments.length === 0) return null
-
-  const images = attachments.filter((a) => a.data)
-  const files = attachments.filter((a) => !a.data)
-
-  const getFileLanguage = (name: string): string => {
-    const ext = name.split(".").pop()?.toLowerCase() || ""
-    const map: Record<string, string> = { tsx: "tsx", ts: "typescript", jsx: "jsx", js: "javascript", py: "python", md: "md", json: "json", css: "css", html: "html" }
-    return map[ext] || ext
-  }
-
-  const isCodeFile = (name: string): boolean => {
-    const ext = name.split(".").pop()?.toLowerCase() || ""
-    const codeExts = ["tsx", "ts", "jsx", "js", "py", "json", "css", "html", "rb", "go", "rs", "java", "c", "cpp", "h", "sh", "bash", "yaml", "yml", "toml", "xml", "sql", "vue", "svelte"]
-    return codeExts.includes(ext)
-  }
-
-  return (
-    <div className="flex flex-col gap-3 mb-2 items-end">
-      {images.length > 0 && (
-        <AttachmentGroup>
-          {images.map((att) => (
-            <Attachment key={att.id} orientation="vertical">
-              <AttachmentMedia variant="image">
-                <img src={att.data} alt={att.name} />
-              </AttachmentMedia>
-              <AttachmentContent>
-                <AttachmentTitle>{att.name}</AttachmentTitle>
-                <AttachmentDescription>
-                  {att.mime.split("/")[1]?.toUpperCase()} · {formatFileSize(att.size)}
-                </AttachmentDescription>
-              </AttachmentContent>
-            </Attachment>
-          ))}
-        </AttachmentGroup>
-      )}
-      {files.map((att) => (
-        <Attachment
-          key={att.id}
-          className={`w-full ${onOpenArtifact && att.content ? "cursor-pointer hover:bg-white/5" : ""}`}
-          onClick={onOpenArtifact && att.content ? () => onOpenArtifact(att.name, att.content!, isCodeFile(att.name) ? "code" : "document", getFileLanguage(att.name)) : undefined}
-        >
-          <AttachmentMedia>
-            <FileCodeIcon />
-          </AttachmentMedia>
-          <AttachmentContent>
-            <AttachmentTitle>{att.name}</AttachmentTitle>
-            <AttachmentDescription>
-              {getFileExtension(att.name)} · {formatFileSize(att.size)}
-            </AttachmentDescription>
-          </AttachmentContent>
-        </Attachment>
-      ))}
-    </div>
-  )
 }
 
 interface LiveToolEvent {
@@ -191,13 +107,12 @@ function accumulateSegments(events: RuntimeEvent[]): TurnSegment[] {
 }
 
 export function ChatView({ chatId }: ChatViewProps) {
-  const { getChat, addMessage, isArtifactPanelOpen, openArtifact, openArtifactPanel, closeArtifactPanel } = useChats()
+  const { getChat, addMessage, addArtifact, isArtifactPanelOpen, openArtifact, openArtifactPanel, closeArtifactPanel } = useChats()
   const chat = getChat(chatId)
 
   const [events, setEvents] = useState<RuntimeEvent[]>([])
   const [currentText, setCurrentText] = useState("")
   const [errorText, setErrorText] = useState("")
-  const [toolArtifacts, setToolArtifacts] = useState<Map<string, ArtifactPart>>(new Map())
 
   const eventsRef = useRef<RuntimeEvent[]>([])
   const currentTextRef = useRef("")
@@ -282,26 +197,21 @@ export function ChatView({ chatId }: ChatViewProps) {
 
         if (event.type === "artifact.created") {
           const artifactEvent = event as ArtifactCreatedEvent
-          setToolArtifacts((prev) => {
-            const next = new Map(prev)
-            next.set(artifactEvent.artifactId, {
-              type: "artifact",
-              id: artifactEvent.artifactId,
-              name: artifactEvent.name,
-              content: artifactEvent.content,
-              artifactType: artifactEvent.artifactType,
-              language: artifactEvent.language,
-              createdAt: artifactEvent.timestamp,
-            })
-            return next
+          addArtifact(chatId, {
+            type: "artifact",
+            id: artifactEvent.artifactId,
+            name: artifactEvent.name,
+            content: artifactEvent.content,
+            artifactType: artifactEvent.artifactType,
+            language: artifactEvent.language,
+            createdAt: artifactEvent.timestamp,
           })
-          openArtifact(artifactEvent.artifactId)
         }
       },
     }, userMessage ?? "")
 
     cleanupRef.current = cleanup
-  }, [chatId, addMessage])
+  }, [chatId, addMessage, addArtifact])
 
   const handleSend = useCallback((message: string, attachments: AttachmentPart[] = []) => {
     if (cleanupRef.current) {
@@ -336,44 +246,37 @@ export function ChatView({ chatId }: ChatViewProps) {
   }, [chatId, addMessage, segments])
 
   const handleOpenToolArtifact = useCallback((call: ToolCallEntry) => {
+    if (call.name === "read_file") return
     const artifactId = `tool-${call.toolCallId}`
     const input = typeof call.input === "string" ? call.input : ""
     const output = typeof call.output === "string" ? call.output : ""
     const name = input.split("/").pop() || call.name
 
-    setToolArtifacts((prev) => {
-      const next = new Map(prev)
-      next.set(artifactId, {
-        type: "artifact",
-        id: artifactId,
-        name,
-        content: output || "(no output)",
-        artifactType: call.name === "shell" ? "code" : "code",
-        language: call.name === "shell" ? "bash" : name.split(".").pop(),
-        createdAt: Date.now(),
-      })
-      return next
+    addArtifact(chatId, {
+      type: "artifact",
+      id: artifactId,
+      name,
+      content: output || "(no output)",
+      artifactType: call.name === "shell" ? "code" : "code",
+      language: call.name === "shell" ? "bash" : name.split(".").pop(),
+      createdAt: Date.now(),
     })
     openArtifact(artifactId)
-  }, [openArtifact])
+  }, [chatId, addArtifact, openArtifact])
 
   const handleOpenAttachment = useCallback((name: string, content: string, type: "document" | "code", language?: string) => {
     const artifactId = `att-${name}`
-    setToolArtifacts((prev) => {
-      const next = new Map(prev)
-      next.set(artifactId, {
-        type: "artifact",
-        id: artifactId,
-        name,
-        content,
-        artifactType: type,
-        language,
-        createdAt: Date.now(),
-      })
-      return next
+    addArtifact(chatId, {
+      type: "artifact",
+      id: artifactId,
+      name,
+      content,
+      artifactType: type,
+      language,
+      createdAt: Date.now(),
     })
     openArtifact(artifactId)
-  }, [openArtifact])
+  }, [chatId, addArtifact, openArtifact])
 
   const toggleArtifactPanel = useCallback(() => {
     if (isArtifactPanelOpen) {
@@ -381,6 +284,23 @@ export function ChatView({ chatId }: ChatViewProps) {
     } else {
       openArtifactPanel()
     }
+  }, [isArtifactPanelOpen, openArtifactPanel, closeArtifactPanel])
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.repeat || event.metaKey || event.ctrlKey || event.altKey) return
+      const tag = (event.target as HTMLElement).tagName
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return
+      if (event.key.toLowerCase() === "d") {
+        if (isArtifactPanelOpen) {
+          closeArtifactPanel()
+        } else {
+          openArtifactPanel()
+        }
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
   }, [isArtifactPanelOpen, openArtifactPanel, closeArtifactPanel])
 
   const isError = phase === "error"
@@ -483,10 +403,22 @@ export function ChatView({ chatId }: ChatViewProps) {
                         </div>
                       ) : (
                         <div className="flex flex-col items-end gap-1">
-                          <UserAttachments
-                            attachments={msg.parts.filter((p): p is AttachmentPart => p.type === "attachment")}
-                            onOpenArtifact={handleOpenAttachment}
-                          />
+                          <div className="flex gap-2 overflow-x-auto snap-x snap-mandatory scrollbar-none">
+                            {msg.parts.filter((p): p is AttachmentPart => p.type === "attachment").map((att) => {
+                              const getFileLanguage = (n: string) => {
+                                const ext = n.split(".").pop()?.toLowerCase() || ""
+                                const map: Record<string, string> = { tsx: "tsx", ts: "typescript", jsx: "jsx", js: "javascript", py: "python", md: "md", json: "json", css: "css", html: "html" }
+                                return map[ext] || ext
+                              }
+                              return (
+                                <AttachmentCard
+                                  key={att.id}
+                                  attachment={att}
+                                  onClick={att.content ? () => handleOpenAttachment(att.name, att.content!, isMarkdownFile(att.name) ? "document" : "code", getFileLanguage(att.name)) : undefined}
+                                />
+                              )
+                            })}
+                          </div>
                           <div className="rounded-2xl px-4 py-2 bg-primary text-primary-foreground">
                             <p className="whitespace-pre-wrap">
                               {msg.parts.filter((p) => p.type === "text").map((p) => p.text).join("")}
@@ -564,7 +496,7 @@ export function ChatView({ chatId }: ChatViewProps) {
         className={`shrink-0 overflow-hidden transition-[width] duration-300 ease-in-out ${isArtifactPanelOpen ? "w-[400px]" : "w-0"}`}
       >
         <div className="w-[400px] h-full">
-          <ArtifactPanel chatId={chatId} extraArtifacts={Array.from(toolArtifacts.values())} />
+          <ArtifactPanel chatId={chatId} />
         </div>
       </div>
     </div>

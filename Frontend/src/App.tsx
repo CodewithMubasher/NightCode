@@ -13,7 +13,7 @@ import {
   SidebarMenuItem,
   SidebarMenuAction,
 } from "@/components/ui/sidebar"
-import { Eclipse, Settings, CirclePlus, FolderOpen, ClockFading, Scroll, Settings2, Ellipsis, ChevronDown, Check } from "lucide-react"
+import { Eclipse, Settings, CirclePlus, FolderOpen, ClockFading, Scroll, Settings2, Ellipsis, ChevronDown, Check, Pin, PinOff, Trash2 } from "lucide-react"
 import {
   Avatar,
   AvatarFallback,
@@ -21,13 +21,14 @@ import {
 import { useState, useRef, useEffect } from "react"
 import { Outlet, useNavigate, useRouterState } from "@tanstack/react-router"
 import { useChats } from "@/context/chat-context"
+import { DropdownMenu, DropdownMenuItem } from "@/components/ui/dropdown-menu"
 
 export function App() {
   const [workspaceOpen, setWorkspaceOpen] = useState(false)
   const [workspace, setWorkspace] = useState("my-workspace")
   const workspaceRef = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
-  const { chats, isArtifactPanelOpen, openArtifactPanel, closeArtifactPanel } = useChats()
+  const { chats, deleteChat, togglePinChat, isArtifactPanelOpen, openArtifactPanel, closeArtifactPanel } = useChats()
   const routerState = useRouterState()
   const isHome = routerState.location.pathname === "/"
 
@@ -52,7 +53,7 @@ export function App() {
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton size="lg">
-                <Eclipse style={{ width: "1.45rem", height: "1.45rem" }} className="text-primary" />
+                <Eclipse style={{ width: "1.45rem", height: "1.45rem" }} className="text-[#a3004c]" />
                 <span className="text-lg font-medium text-white" style={{ fontFamily: "'Google Sans Flex', sans-serif" }}>NightCode</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
@@ -108,11 +109,32 @@ export function App() {
                       tooltip={chat.title}
                       onClick={() => navigate({ to: "/chat/$chatId", params: { chatId: chat.id } })}
                     >
-                      <ClockFading className="size-4 shrink-0" />
+                      {chat.pinned ? (
+                        <Pin className="size-4 shrink-0" />
+                      ) : (
+                        <ClockFading className="size-4 shrink-0" />
+                      )}
                       <span className="truncate">{chat.title}</span>
                     </SidebarMenuButton>
                     <SidebarMenuAction showOnHover>
-                      <Ellipsis className="size-4" />
+                      <DropdownMenu
+                        trigger={<Ellipsis className="size-4" />}
+                        align="right"
+                      >
+                        <DropdownMenuItem onClick={() => togglePinChat(chat.id)}>
+                          {chat.pinned ? <PinOff className="size-3.5" /> : <Pin className="size-3.5" />}
+                          <span>{chat.pinned ? "Unpin chat" : "Pin chat"}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => {}}>
+                          <FolderOpen className="size-3.5" />
+                          <span>Add to project</span>
+                        </DropdownMenuItem>
+                        <div className="my-1 h-px bg-white/10" />
+                        <DropdownMenuItem variant="destructive" onClick={() => deleteChat(chat.id)}>
+                          <Trash2 className="size-3.5" />
+                          <span>Delete chat</span>
+                        </DropdownMenuItem>
+                      </DropdownMenu>
                     </SidebarMenuAction>
                   </SidebarMenuItem>
                 ))}

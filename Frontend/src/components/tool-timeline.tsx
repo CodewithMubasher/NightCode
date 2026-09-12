@@ -124,7 +124,7 @@ export function ToolTimeline({ isAgentStarted, isAgentCompleted, toolEvents, too
                 detail={detail}
                 isDetailExpanded={isDetailExpanded}
                 onToggleDetail={detail ? () => setExpandedDetail(isDetailExpanded ? null : call.toolCallId) : undefined}
-                onOpenArtifact={call.status !== "running" && onOpenArtifact ? () => onOpenArtifact(call) : undefined}
+                onOpenArtifact={call.status !== "running" && call.name !== "read_file" && onOpenArtifact ? () => onOpenArtifact(call) : undefined}
               />
             )
           })}

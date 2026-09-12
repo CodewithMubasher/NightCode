@@ -1,11 +1,33 @@
-import { createContext, useContext, useState, useCallback, useMemo, type ReactNode } from "react"
+import { createContext, useContext, useState, useCallback, useEffect, useMemo, type ReactNode } from "react"
 import { type Chat, type Message, type MessagePart, type ArtifactPart, type TurnSegment, generateId, truncateTitle } from "@/types/message"
+
+const STORAGE_KEY = "nightcode-chats"
+
+function loadChats(): Chat[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as Chat[]
+    return parsed.map((c) => ({ ...c, artifacts: c.artifacts ?? [] }))
+  } catch {
+    return []
+  }
+}
+
+function saveChats(chats: Chat[]) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(chats))
+  } catch {}
+}
 
 interface ChatContextType {
   chats: Chat[]
   getChat: (id: string) => Chat | undefined
   createChat: (firstMessage: string) => string
   addMessage: (chatId: string, role: "user" | "assistant", parts: MessagePart[], segments?: TurnSegment[]) => void
+  addArtifact: (chatId: string, artifact: ArtifactPart) => void
+  deleteChat: (chatId: string) => void
+  togglePinChat: (chatId: string) => void
   isArtifactPanelOpen: boolean
   activeArtifactId: string | null
   openArtifactPanel: () => void
@@ -17,9 +39,13 @@ interface ChatContextType {
 const ChatContext = createContext<ChatContextType | null>(null)
 
 export function ChatProvider({ children }: { children: ReactNode }) {
-  const [chats, setChats] = useState<Chat[]>([])
+  const [chats, setChats] = useState<Chat[]>(loadChats)
   const [isArtifactPanelOpen, setIsArtifactPanelOpen] = useState(false)
   const [activeArtifactId, setActiveArtifactId] = useState<string | null>(null)
+
+  useEffect(() => {
+    saveChats(chats)
+  }, [chats])
 
   const getChat = useCallback((id: string) => {
     return chats.find((c) => c.id === id)
@@ -31,6 +57,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       id,
       title: truncateTitle(firstMessage),
       messages: [],
+      artifacts: [],
       createdAt: Date.now(),
     }
     setChats((prev) => [newChat, ...prev])
@@ -46,10 +73,61 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       timestamp: Date.now(),
     }
     setChats((prev) =>
+      prev.map((chat) => {
+        if (chat.id !== chatId) return chat
+        const updatedChat = { ...chat, messages: [...chat.messages, newMessage] }
+        const newArtifacts: ArtifactPart[] = []
+        for (const part of parts) {
+          if (part.type === "attachment" && part.content) {
+            const ext = part.name.split(".").pop()?.toLowerCase() || ""
+            const isMd = ext === "md"
+            const languageMap: Record<string, string> = { tsx: "tsx", ts: "typescript", jsx: "jsx", js: "javascript", py: "python", md: "md", json: "json", css: "css", html: "html" }
+            newArtifacts.push({
+              type: "artifact",
+              id: `att-${part.name}`,
+              name: part.name,
+              content: part.content,
+              artifactType: isMd ? "document" : "code",
+              language: languageMap[ext] || ext,
+              createdAt: Date.now(),
+            })
+          }
+        }
+        if (newArtifacts.length > 0) {
+          const merged = new Map<string, ArtifactPart>()
+          for (const a of updatedChat.artifacts) merged.set(a.id, a)
+          for (const a of newArtifacts) merged.set(a.id, a)
+          updatedChat.artifacts = Array.from(merged.values())
+        }
+        return updatedChat
+      })
+    )
+  }, [])
+
+  const addArtifact = useCallback((chatId: string, artifact: ArtifactPart) => {
+    setChats((prev) =>
+      prev.map((chat) => {
+        if (chat.id !== chatId) return chat
+        const exists = chat.artifacts.some((a) => a.id === artifact.id)
+        if (exists) {
+          return {
+            ...chat,
+            artifacts: chat.artifacts.map((a) => (a.id === artifact.id ? artifact : a)),
+          }
+        }
+        return { ...chat, artifacts: [...chat.artifacts, artifact] }
+      })
+    )
+  }, [])
+
+  const deleteChat = useCallback((chatId: string) => {
+    setChats((prev) => prev.filter((c) => c.id !== chatId))
+  }, [])
+
+  const togglePinChat = useCallback((chatId: string) => {
+    setChats((prev) =>
       prev.map((chat) =>
-        chat.id === chatId
-          ? { ...chat, messages: [...chat.messages, newMessage] }
-          : chat
+        chat.id === chatId ? { ...chat, pinned: !chat.pinned } : chat
       )
     )
   }, [])
@@ -72,29 +150,43 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const getArtifactsForChat = useCallback((chatId: string): ArtifactPart[] => {
     const chat = chats.find((c) => c.id === chatId)
     if (!chat) return []
-    const artifacts: ArtifactPart[] = []
+    const messageArtifacts: ArtifactPart[] = []
     for (const msg of chat.messages) {
       for (const part of msg.parts) {
         if (part.type === "artifact") {
-          artifacts.push(part)
+          messageArtifacts.push(part)
         }
       }
     }
-    return artifacts
+    const merged = new Map<string, ArtifactPart>()
+    for (const a of messageArtifacts) merged.set(a.id, a)
+    for (const a of chat.artifacts) merged.set(a.id, a)
+    return Array.from(merged.values())
+  }, [chats])
+
+  const sortedChats = useMemo(() => {
+    return [...chats].sort((a, b) => {
+      if (a.pinned && !b.pinned) return -1
+      if (!a.pinned && b.pinned) return 1
+      return b.createdAt - a.createdAt
+    })
   }, [chats])
 
   const value = useMemo(() => ({
-    chats,
+    chats: sortedChats,
     getChat,
     createChat,
     addMessage,
+    addArtifact,
+    deleteChat,
+    togglePinChat,
     isArtifactPanelOpen,
     activeArtifactId,
     openArtifactPanel,
     openArtifact,
     closeArtifactPanel,
     getArtifactsForChat,
-  }), [chats, getChat, createChat, addMessage, isArtifactPanelOpen, activeArtifactId, openArtifactPanel, openArtifact, closeArtifactPanel, getArtifactsForChat])
+  }), [sortedChats, getChat, createChat, addMessage, addArtifact, deleteChat, togglePinChat, isArtifactPanelOpen, activeArtifactId, openArtifactPanel, openArtifact, closeArtifactPanel, getArtifactsForChat])
 
   return (
     <ChatContext.Provider value={value}>

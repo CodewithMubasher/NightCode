@@ -7,7 +7,6 @@ import { codeToHtml } from "shiki"
 
 interface ArtifactPanelProps {
   chatId: string
-  extraArtifacts?: ArtifactPart[]
 }
 
 function getLanguageLabel(language?: string): string {
@@ -146,18 +145,9 @@ function DetailView({ artifact, onBack, onClose }: { artifact: ArtifactPart; onB
   )
 }
 
-export function ArtifactPanel({ chatId, extraArtifacts = [] }: ArtifactPanelProps) {
+export function ArtifactPanel({ chatId }: ArtifactPanelProps) {
   const { activeArtifactId, openArtifact, closeArtifactPanel, getArtifactsForChat } = useChats()
-  const contextArtifacts = useMemo(() => getArtifactsForChat(chatId), [getArtifactsForChat, chatId])
-  const artifacts = useMemo(() => {
-    const merged = [...contextArtifacts]
-    for (const extra of extraArtifacts) {
-      if (!merged.some((a) => a.id === extra.id)) {
-        merged.push(extra)
-      }
-    }
-    return merged
-  }, [contextArtifacts, extraArtifacts])
+  const artifacts = useMemo(() => getArtifactsForChat(chatId), [getArtifactsForChat, chatId])
   const activeArtifact = useMemo(
     () => artifacts.find((a) => a.id === activeArtifactId) ?? null,
     [artifacts, activeArtifactId]

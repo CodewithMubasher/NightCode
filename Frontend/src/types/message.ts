@@ -68,7 +68,9 @@ export interface Chat {
   id: string
   title: string
   messages: Message[]
+  artifacts: ArtifactPart[]
   createdAt: number
+  pinned?: boolean
 }
 
 export function generateId(): string {

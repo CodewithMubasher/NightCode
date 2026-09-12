@@ -1,14 +1,6 @@
-import { Eclipse, Plus, Paperclip, ArrowUp, Square, ShieldCheck, Zap, ShieldAlert, ChevronDown, FileCodeIcon, XIcon } from "lucide-react"
+import { Eclipse, Plus, Paperclip, ArrowUp, Square, ShieldCheck, Zap, ShieldAlert, ChevronDown } from "lucide-react"
 import { useState, useRef, useEffect, type KeyboardEvent } from "react"
-import {
-  Attachment,
-  AttachmentMedia,
-  AttachmentContent,
-  AttachmentTitle,
-  AttachmentDescription,
-  AttachmentActions,
-  AttachmentAction,
-} from "@/components/ui/attachment"
+import { AttachmentCard } from "@/components/attachment-card"
 import type { AttachmentPart } from "@/types/message"
 
 const options = [
@@ -58,25 +50,6 @@ function readFileAsText(file: File): Promise<string> {
     reader.onerror = reject
     reader.readAsText(file)
   })
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
-function getFileExtension(name: string): string {
-  const ext = name.split(".").pop()?.toLowerCase() ?? ""
-  const map: Record<string, string> = {
-    ts: "TypeScript", tsx: "TypeScript", js: "JavaScript", jsx: "JavaScript",
-    py: "Python", go: "Go", rs: "Rust", java: "Java", c: "C", cpp: "C++",
-    cs: "C#", rb: "Ruby", php: "PHP", swift: "Swift", kt: "Kotlin",
-    html: "HTML", css: "CSS", scss: "SCSS", json: "JSON", yaml: "YAML",
-    yml: "YAML", xml: "XML", sql: "SQL", sh: "Shell", md: "Markdown",
-    txt: "Text", vue: "Vue", svelte: "Svelte",
-  }
-  return map[ext] ?? ext.toUpperCase()
 }
 
 interface PromptInputProps {
@@ -164,50 +137,14 @@ export function PromptInput({ onSend, onCancel, isInChat = false, isGenerating =
   const renderAttachments = () => {
     if (attachments.length === 0) return null
 
-    const images = attachments.filter((a) => a.data)
-    const files = attachments.filter((a) => !a.data)
-
     return (
-      <div className="flex flex-col gap-3 mb-3">
-        {images.length > 0 && (
-          <div className="grid grid-cols-4 gap-2">
-            {images.map((att) => (
-              <Attachment key={att.id} orientation="vertical" className="w-full">
-                <AttachmentMedia variant="image" className="aspect-square size-20">
-                  <img src={att.data} alt={att.name} className="size-full object-cover rounded-lg" />
-                </AttachmentMedia>
-                <AttachmentContent>
-                  <AttachmentTitle>{att.name}</AttachmentTitle>
-                  <AttachmentDescription>
-                    {att.mime.split("/")[1]?.toUpperCase()} · {formatFileSize(att.size)}
-                  </AttachmentDescription>
-                </AttachmentContent>
-                <AttachmentActions>
-                  <AttachmentAction onClick={() => handleRemoveAttachment(att.id)}>
-                    <XIcon />
-                  </AttachmentAction>
-                </AttachmentActions>
-              </Attachment>
-            ))}
-          </div>
-        )}
-        {files.map((att) => (
-          <Attachment key={att.id} className="w-full">
-            <AttachmentMedia>
-              <FileCodeIcon />
-            </AttachmentMedia>
-            <AttachmentContent>
-              <AttachmentTitle>{att.name}</AttachmentTitle>
-              <AttachmentDescription>
-                {getFileExtension(att.name)} · {formatFileSize(att.size)}
-              </AttachmentDescription>
-            </AttachmentContent>
-            <AttachmentActions>
-              <AttachmentAction onClick={() => handleRemoveAttachment(att.id)}>
-                <XIcon />
-              </AttachmentAction>
-            </AttachmentActions>
-          </Attachment>
+      <div className="mb-3 flex gap-2 overflow-x-auto snap-x snap-mandatory scrollbar-none">
+        {attachments.map((att) => (
+          <AttachmentCard
+            key={att.id}
+            attachment={att}
+            onRemove={handleRemoveAttachment}
+          />
         ))}
       </div>
     )

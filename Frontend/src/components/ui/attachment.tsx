@@ -5,9 +5,10 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "cn"
 
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 
 const attachmentVariants = cva(
-  "group/attachment relative flex w-fit max-w-full min-w-0 shrink-0 flex-wrap rounded-2xl border bg-card text-card-foreground transition-colors focus-within:ring-1 focus-within:ring-ring/30 has-[>a,>button]:hover:bg-muted/50 data-[state=error]:border-destructive/30 data-[state=idle]:border-dashed",
+  "group/attachment relative flex w-fit max-w-full min-w-35 min-h-32 shrink-0 flex-wrap rounded-2xl border bg-card text-card-foreground transition-colors focus-within:ring-1 focus-within:ring-ring/30 has-[>a,>button]:hover:bg-muted/50 data-[state=error]:border-destructive/30 data-[state=idle]:border-dashed",
   {
     variants: {
       size: {
@@ -17,8 +18,8 @@ const attachmentVariants = cva(
         xs: "gap-1.5 rounded-xl text-xs has-data-[slot=attachment-content]:px-1.5 has-data-[slot=attachment-content]:py-1 has-data-[slot=attachment-media]:p-1",
       },
       orientation: {
-        horizontal: "min-w-40 items-center",
-        vertical: "w-24 flex-col has-data-[slot=attachment-content]:w-30",
+        horizontal: "min-w-70 items-center",
+        vertical: "flex-col",
       },
     },
   }
@@ -101,7 +102,7 @@ function AttachmentTitle({
     <span
       data-slot="attachment-title"
       className={cn(
-        "block max-w-full min-w-0 truncate font-medium group-data-[state=processing]/attachment:shimmer group-data-[state=uploading]/attachment:shimmer",
+        "block max-w-full min-w-0 font-medium group-data-[state=processing]/attachment:shimmer group-data-[state=uploading]/attachment:shimmer",
         className
       )}
       {...props}
@@ -117,7 +118,7 @@ function AttachmentDescription({
     <span
       data-slot="attachment-description"
       className={cn(
-        "mt-0.5 block min-w-0 truncate text-xs text-muted-foreground group-data-[state=error]/attachment:text-destructive/80",
+        "mt-0.5 block min-w-0 text-xs text-muted-foreground group-data-[state=error]/attachment:text-destructive/80",
         "max-w-full",
         className
       )}
@@ -181,6 +182,19 @@ function AttachmentTrigger({
   })
 }
 
+function AttachmentBadge({ className, ...props }: React.ComponentProps<typeof Badge>) {
+  return (
+    <Badge
+      variant="secondary"
+      className={cn(
+        "mt-12 h-4 px-1.5 text-[10px] font-medium bg-white/10 text-white/60 border-white/10",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
 function AttachmentGroup({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -204,4 +218,5 @@ export {
   AttachmentActions,
   AttachmentAction,
   AttachmentTrigger,
+  AttachmentBadge,
 }
