@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/message-scroller"
 import { Eclipse, Copy, ThumbsUp, ThumbsDown, RotateCcw, FileText } from "lucide-react"
 import { emitFakeRuntime } from "@/lib/runtime"
+import { emitBackendRuntime, cancelBackendRun } from "@/lib/backend-runtime"
 import type { RuntimeEvent, ArtifactCreatedEvent } from "@/types/events"
 import type { AttachmentPart, TurnSegment, ToolCallEntry } from "@/types/message"
 import { AttachmentCard, isMarkdownFile } from "@/components/attachment-card"
@@ -159,59 +160,117 @@ export function ChatView({ chatId }: ChatViewProps) {
     currentTextRef.current = ""
     setErrorText("")
 
-    const cleanup = emitFakeRuntime({
-      onEvent: (event) => {
-        setEvents((prev) => {
-          const next = [...prev, event]
-          eventsRef.current = next
-          return next
-        })
+    const useMock = import.meta.env.VITE_USE_MOCK === "true"
 
-        if (event.type === "assistant.delta") {
-          if (event.text === "__DONE__") {
-            const snapshot = eventsRef.current
-            const accumulated = accumulateSegments(snapshot)
+    if (useMock) {
+      const cleanup = emitFakeRuntime({
+        onEvent: (event) => {
+          setEvents((prev) => {
+            const next = [...prev, event]
+            eventsRef.current = next
+            return next
+          })
 
-            addMessage(chatId, "assistant", [], accumulated)
+          if (event.type === "assistant.delta") {
+            if (event.text === "__DONE__") {
+              const snapshot = eventsRef.current
+              const accumulated = accumulateSegments(snapshot)
 
+              addMessage(chatId, "assistant", [], accumulated)
+
+              setCurrentText("")
+              currentTextRef.current = ""
+              setEvents([])
+              eventsRef.current = []
+            } else {
+              setCurrentText(event.text)
+              currentTextRef.current = event.text
+            }
+          }
+
+          if (event.type === "agent.error") {
+            setErrorText(event.error)
+            addMessage(chatId, "assistant", [
+              { type: "text", text: `Error: ${event.error}` },
+            ])
             setCurrentText("")
             currentTextRef.current = ""
             setEvents([])
             eventsRef.current = []
-          } else {
-            setCurrentText(event.text)
-            currentTextRef.current = event.text
           }
-        }
 
-        if (event.type === "agent.error") {
-          setErrorText(event.error)
-          addMessage(chatId, "assistant", [
-            { type: "text", text: `Error: ${event.error}` },
-          ])
-          setCurrentText("")
-          currentTextRef.current = ""
-          setEvents([])
-          eventsRef.current = []
-        }
+          if (event.type === "artifact.created") {
+            const artifactEvent = event as ArtifactCreatedEvent
+            addArtifact(chatId, {
+              type: "artifact",
+              id: artifactEvent.artifactId,
+              name: artifactEvent.name,
+              content: artifactEvent.content,
+              artifactType: artifactEvent.artifactType,
+              language: artifactEvent.language,
+              createdAt: artifactEvent.timestamp,
+            })
+          }
+        },
+      }, userMessage ?? "")
 
-        if (event.type === "artifact.created") {
-          const artifactEvent = event as ArtifactCreatedEvent
-          addArtifact(chatId, {
-            type: "artifact",
-            id: artifactEvent.artifactId,
-            name: artifactEvent.name,
-            content: artifactEvent.content,
-            artifactType: artifactEvent.artifactType,
-            language: artifactEvent.language,
-            createdAt: artifactEvent.timestamp,
+      cleanupRef.current = cleanup
+    } else {
+      const workspaceId = chat?.workspaceId
+      const cleanup = emitBackendRuntime({
+        onEvent: (event) => {
+          setEvents((prev) => {
+            const next = [...prev, event]
+            eventsRef.current = next
+            return next
           })
-        }
-      },
-    }, userMessage ?? "")
 
-    cleanupRef.current = cleanup
-  }, [chatId, addMessage, addArtifact])
+          if (event.type === "assistant.delta") {
+            if (event.text === "__DONE__") {
+              const snapshot = eventsRef.current
+              const accumulated = accumulateSegments(snapshot)
+
+              addMessage(chatId, "assistant", [], accumulated)
+
+              setCurrentText("")
+              currentTextRef.current = ""
+              setEvents([])
+              eventsRef.current = []
+            } else {
+              setCurrentText(event.text)
+              currentTextRef.current = event.text
+            }
+          }
+
+          if (event.type === "agent.error") {
+            setErrorText(event.error)
+            addMessage(chatId, "assistant", [
+              { type: "text", text: `Error: ${event.error}` },
+            ])
+            setCurrentText("")
+            currentTextRef.current = ""
+            setEvents([])
+            eventsRef.current = []
+          }
+
+          if (event.type === "artifact.created") {
+            const artifactEvent = event as ArtifactCreatedEvent
+            addArtifact(chatId, {
+              type: "artifact",
+              id: artifactEvent.artifactId,
+              name: artifactEvent.name,
+              content: artifactEvent.content,
+              artifactType: artifactEvent.artifactType,
+              language: artifactEvent.language,
+              createdAt: artifactEvent.timestamp,
+            })
+          }
+        },
+      }, userMessage ?? "", chatId, workspaceId)
+
+      cleanupRef.current = cleanup
+    }
+  }, [chatId, chat?.workspaceId, addMessage, addArtifact])
 
   const handleSend = useCallback((message: string, attachments: AttachmentPart[] = []) => {
     if (cleanupRef.current) {
@@ -235,6 +294,10 @@ export function ChatView({ chatId }: ChatViewProps) {
       cleanupRef.current = null
     }
 
+    // Also cancel on the backend
+    const workspaceId = chat?.workspaceId
+    cancelBackendRun(chatId, workspaceId)
+
     if (currentTextRef.current || segments.length > 0) {
       addMessage(chatId, "assistant", [], segments)
     }
@@ -243,7 +306,7 @@ export function ChatView({ chatId }: ChatViewProps) {
     currentTextRef.current = ""
     setEvents([])
     eventsRef.current = []
-  }, [chatId, addMessage, segments])
+  }, [chatId, chat?.workspaceId, addMessage, segments])
 
   const handleOpenToolArtifact = useCallback((call: ToolCallEntry) => {
     if (call.name === "read_file") return
