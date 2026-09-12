@@ -18,15 +18,40 @@ import {
   Avatar,
   AvatarFallback,
 } from "@/components/ui/avatar"
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useMemo, createContext, useContext } from "react"
 import { Outlet, useNavigate, useRouterState } from "@tanstack/react-router"
 import { useChats } from "@/context/chat-context"
 import { DropdownMenu, DropdownMenuItem } from "@/components/ui/dropdown-menu"
 
+interface Workspace {
+  id: string
+  name: string
+  description: string
+  createdAt: number
+}
+
+function loadWorkspaces(): Workspace[] {
+  try {
+    const raw = localStorage.getItem("nightcode-workspaces")
+    if (!raw) return []
+    return JSON.parse(raw) as Workspace[]
+  } catch {
+    return []
+  }
+}
+
+const SelectedWorkspaceContext = createContext<string>("")
+
+export function useSelectedWorkspace() {
+  return useContext(SelectedWorkspaceContext)
+}
+
 export function App() {
   const [workspaceOpen, setWorkspaceOpen] = useState(false)
-  const [workspace, setWorkspace] = useState("my-workspace")
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>("")
   const workspaceRef = useRef<HTMLDivElement>(null)
+  const workspaces = useMemo(() => loadWorkspaces(), [])
+  const selectedWorkspace = workspaces.find((w) => w.id === selectedWorkspaceId)
   const navigate = useNavigate()
   const { chats, deleteChat, togglePinChat, isArtifactPanelOpen, openArtifactPanel, closeArtifactPanel } = useChats()
   const routerState = useRouterState()
@@ -88,7 +113,7 @@ export function App() {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>
-                  <SidebarMenuButton tooltip="Settings">
+                  <SidebarMenuButton tooltip="Settings" onClick={() => navigate({ to: "/settings" })}>
                     <Settings className="size-4" />
                     <span>Settings</span>
                   </SidebarMenuButton>
@@ -171,29 +196,46 @@ export function App() {
           <div className="relative p-4 shrink-0" ref={workspaceRef}>
             <button
               onClick={() => setWorkspaceOpen(!workspaceOpen)}
-              className="flex items-center gap-2 rounded-lg bg-white/0 px-3 py-1.5 text-sm text-white/70 cursor-pointer hover:bg-white/10"
+              className="flex items-center gap-2 rounded-full bg-white/0 px-3 py-1.5 text-sm text-white/70 cursor-pointer hover:bg-white/10"
             >
               <FolderOpen className="size-4" />
-              <span>Workspace</span>
+              <span>{selectedWorkspace?.name ?? "Workspace"}</span>
               <ChevronDown className={`size-3.5 transition-transform duration-200 ${workspaceOpen ? "rotate-180" : ""}`} />
             </button>
             {workspaceOpen && (
-              <div className="absolute top-full left-4 mt-1 w-52 rounded-xl border border-white/10 bg-neutral-900 shadow-lg overflow-hidden p-1">
+              <div className="absolute top-full left-4 mt-1 w-44 rounded-xl border border-white/10 bg-neutral-900 shadow-lg overflow-hidden p-1">
                 <button
                   onClick={() => {
-                    setWorkspace("my-workspace")
+                    setSelectedWorkspaceId("")
                     setWorkspaceOpen(false)
                   }}
-                  className={`flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-xs text-white hover:bg-white/10 cursor-pointer ${workspace === "my-workspace" ? "bg-white/5" : ""}`}
+                  className={`flex w-full items-center gap-2 rounded-full px-3 py-1.5 text-xs text-white hover:bg-white/10 cursor-pointer ${selectedWorkspaceId === "" ? "bg-white/5" : ""}`}
                 >
-                  <Check className={`size-3.5 ${workspace === "my-workspace" ? "opacity-100" : "opacity-0"}`} />
+                  <Check className={`size-3.5 ${selectedWorkspaceId === "" ? "opacity-100" : "opacity-0"}`} />
                   <FolderOpen className="size-3.5" />
-                  <span>My Workspace</span>
+                  <span>No workspace</span>
                 </button>
+                {workspaces.map((ws) => (
+                  <button
+                    key={ws.id}
+                    onClick={() => {
+                      setSelectedWorkspaceId(ws.id)
+                      setWorkspaceOpen(false)
+                    }}
+                    className={`flex w-full items-center gap-2 rounded-full px-3 py-1.5 text-xs text-white hover:bg-white/10 cursor-pointer ${selectedWorkspaceId === ws.id ? "bg-white/5" : ""}`}
+                  >
+                    <Check className={`size-3.5 ${selectedWorkspaceId === ws.id ? "opacity-100" : "opacity-0"}`} />
+                    <FolderOpen className="size-3.5" />
+                    <span>{ws.name}</span>
+                  </button>
+                ))}
                 <div className="my-1 h-px bg-white/10" />
                 <button
-                  onClick={() => setWorkspaceOpen(false)}
-                  className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-xs text-white hover:bg-white/10 cursor-pointer"
+                  onClick={() => {
+                    setWorkspaceOpen(false)
+                    navigate({ to: "/workspaces" })
+                  }}
+                  className="flex w-full items-center gap-2 rounded-full px-3 py-1.5 text-xs text-white hover:bg-white/10 cursor-pointer"
                 >
                   <span className="size-3.5" />
                   <CirclePlus className="size-3.5" />
@@ -204,7 +246,9 @@ export function App() {
           </div>
         )}
         <div className="flex-1 min-h-0">
-          <Outlet />
+          <SelectedWorkspaceContext.Provider value={selectedWorkspaceId}>
+            <Outlet />
+          </SelectedWorkspaceContext.Provider>
         </div>
       </SidebarInset>
     </SidebarProvider>

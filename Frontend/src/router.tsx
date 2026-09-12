@@ -3,6 +3,7 @@ import { ChatView } from "@/components/chat-view"
 import { Home } from "@/pages/home"
 import { Workspaces } from "@/pages/workspaces"
 import { WorkspaceView } from "@/pages/workspace-view"
+import { Settings } from "@/pages/settings"
 import { App } from "@/App"
 
 const rootRoute = createRootRoute({
@@ -39,7 +40,13 @@ const workspaceRoute = createRoute({
   },
 })
 
-const routeTree = rootRoute.addChildren([indexRoute, chatRoute, workspacesRoute, workspaceRoute])
+const settingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/settings",
+  component: Settings,
+})
+
+const routeTree = rootRoute.addChildren([indexRoute, chatRoute, workspacesRoute, workspaceRoute, settingsRoute])
 
 export const router = createRouter({
   routeTree,
