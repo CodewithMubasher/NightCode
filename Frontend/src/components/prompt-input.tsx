@@ -57,9 +57,11 @@ interface PromptInputProps {
   onCancel?: () => void
   isInChat?: boolean
   isGenerating?: boolean
+  heading?: string
+  compact?: boolean
 }
 
-export function PromptInput({ onSend, onCancel, isInChat = false, isGenerating = false }: PromptInputProps) {
+export function PromptInput({ onSend, onCancel, isInChat = false, isGenerating = false, heading, compact = false }: PromptInputProps) {
   const [value, setValue] = useState("")
   const [selected, setSelected] = useState("readonly")
   const [open, setOpen] = useState(false)
@@ -271,8 +273,8 @@ export function PromptInput({ onSend, onCancel, isInChat = false, isGenerating =
     <div className="flex h-full items-center justify-center p-4 -mt-20">
       <div className="w-full max-w-[718px] flex flex-col items-center gap-5">
         <div className="flex items-center gap-2.5">
-          <Eclipse className="size-7 text-primary" />
-          <h1 className="text-2xl font-medium">What can I do for you?</h1>
+          <Eclipse className={compact ? "size-5 text-primary" : "size-7 text-primary"} />
+          <h1 className={compact ? "text-lg font-medium" : "text-2xl font-medium"}>{heading || "What can I do for you?"}</h1>
         </div>
         <div className="w-full rounded-2xl border border-white/10 border-l-2 border-l-primary bg-white/5 backdrop-blur-[2px] px-4 pt-4 pb-2 shadow-sm">
           {renderAttachments()}

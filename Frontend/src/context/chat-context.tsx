@@ -23,7 +23,7 @@ function saveChats(chats: Chat[]) {
 interface ChatContextType {
   chats: Chat[]
   getChat: (id: string) => Chat | undefined
-  createChat: (firstMessage: string) => string
+  createChat: (firstMessage: string, workspaceId?: string) => string
   addMessage: (chatId: string, role: "user" | "assistant", parts: MessagePart[], segments?: TurnSegment[]) => void
   addArtifact: (chatId: string, artifact: ArtifactPart) => void
   deleteChat: (chatId: string) => void
@@ -51,7 +51,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     return chats.find((c) => c.id === id)
   }, [chats])
 
-  const createChat = useCallback((firstMessage: string) => {
+  const createChat = useCallback((firstMessage: string, workspaceId?: string) => {
     const id = generateId()
     const newChat: Chat = {
       id,
@@ -59,6 +59,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       messages: [],
       artifacts: [],
       createdAt: Date.now(),
+      workspaceId,
     }
     setChats((prev) => [newChat, ...prev])
     return id

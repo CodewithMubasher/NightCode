@@ -71,6 +71,7 @@ export interface Chat {
   artifacts: ArtifactPart[]
   createdAt: number
   pinned?: boolean
+  workspaceId?: string
 }
 
 export function generateId(): string {
