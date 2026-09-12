@@ -70,9 +70,9 @@ export function App() {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>
-                  <SidebarMenuButton tooltip="Projects">
+                  <SidebarMenuButton tooltip="Workspaces" onClick={() => navigate({ to: "/workspaces" })}>
                     <FolderOpen className="size-4" />
-                    <span>Projects</span>
+                    <span>Workspaces</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>
