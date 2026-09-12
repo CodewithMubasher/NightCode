@@ -8,6 +8,7 @@ export type Scenario = (callbacks: ScenarioCallbacks) => () => void
 
 function typeText(
   text: string,
+  segmentId: string,
   onDelta: (text: string) => void,
   onDone: () => void
 ): () => void {
@@ -30,10 +31,11 @@ function typeText(
   return () => { cancelled = true; clearInterval(typeInterval) }
 }
 
-function emitDelta(text: string, cb: ScenarioCallbacks): RuntimeEvent {
+function emitDelta(text: string, segmentId: string, cb: ScenarioCallbacks): RuntimeEvent {
   const event: RuntimeEvent = {
     type: "assistant.delta",
     id: generateEventId(),
+    segmentId,
     text,
     timestamp: Date.now(),
   }
@@ -41,10 +43,11 @@ function emitDelta(text: string, cb: ScenarioCallbacks): RuntimeEvent {
   return event
 }
 
-function emitDone(cb: ScenarioCallbacks): RuntimeEvent {
+function emitDone(segmentId: string, cb: ScenarioCallbacks): RuntimeEvent {
   const event: RuntimeEvent = {
     type: "assistant.delta",
     id: generateEventId(),
+    segmentId,
     text: "__DONE__",
     timestamp: Date.now(),
   }
@@ -52,16 +55,20 @@ function emitDone(cb: ScenarioCallbacks): RuntimeEvent {
   return event
 }
 
-// Scenario 01: Simple response (no tools)
+// Case 1: Plain text only, no tools
 export const simpleResponse: Scenario = (cb) => {
   const timers: ReturnType<typeof setTimeout>[] = []
   const cleanup = () => timers.forEach(clearTimeout)
+  const segId = generateEventId()
 
   timers.push(setTimeout(() => {
     const text = "Sure! Here's a quick answer: the component is working correctly. No changes needed."
-    const cancelType = typeText(text,
-      (t) => emitDelta(t, cb),
-      () => emitDone(cb)
+    const cancelType = typeText(text, segId,
+      (t) => emitDelta(t, segId, cb),
+      () => {
+        cb.onEvent({ type: "agent.completed", id: generateEventId(), timestamp: Date.now() })
+        emitDone(segId, cb)
+      }
     )
     timers.push({ clearTimeout: cancelType } as unknown as ReturnType<typeof setTimeout>)
   }, 500))
@@ -69,10 +76,11 @@ export const simpleResponse: Scenario = (cb) => {
   return cleanup
 }
 
-// Scenario 02: Streaming response (text in small chunks)
+// Streaming response (text in small chunks)
 export const streamingResponse: Scenario = (cb) => {
   const timers: ReturnType<typeof setTimeout>[] = []
   const cleanup = () => timers.forEach(clearTimeout)
+  const segId = generateEventId()
 
   timers.push(setTimeout(() => {
     const chunks = [
@@ -89,11 +97,12 @@ export const streamingResponse: Scenario = (cb) => {
     const interval = setInterval(() => {
       if (i < chunks.length) {
         fullText += chunks[i]
-        emitDelta(fullText, cb)
+        emitDelta(fullText, segId, cb)
         i++
       } else {
         clearInterval(interval)
-        emitDone(cb)
+        cb.onEvent({ type: "agent.completed", id: generateEventId(), timestamp: Date.now() })
+        emitDone(segId, cb)
       }
     }, 300)
 
@@ -103,25 +112,30 @@ export const streamingResponse: Scenario = (cb) => {
   return cleanup
 }
 
-// Scenario 03: Read file
+// Case 2: Text → one tool call → text
 export const readFile: Scenario = (cb) => {
   const timers: ReturnType<typeof setTimeout>[] = []
   const cleanup = () => timers.forEach(clearTimeout)
+  const textSegId = generateEventId()
+  const toolSegId = generateEventId()
+  const summarySegId = generateEventId()
   const toolCallId = generateEventId()
 
   timers.push(setTimeout(() => {
-    typeText("Let me check that file for you.",
-      (t) => emitDelta(t, cb),
+    typeText("Let me check that file for you.", textSegId,
+      (t) => emitDelta(t, textSegId, cb),
       () => {
-        cb.onEvent({ type: "tool.started", id: generateEventId(), toolCallId, name: "read_file", input: "src/components/Button.tsx", timestamp: Date.now() })
+        cb.onEvent({ type: "tool.started", id: generateEventId(), segmentId: toolSegId, toolCallId, name: "read_file", input: "src/components/Button.tsx", timestamp: Date.now() })
 
         timers.push(setTimeout(() => {
-          cb.onEvent({ type: "tool.completed", id: generateEventId(), toolCallId, name: "read_file", output: "export function Button() { ... }", timestamp: Date.now() })
-          cb.onEvent({ type: "agent.completed", id: generateEventId(), timestamp: Date.now() })
+          cb.onEvent({ type: "tool.completed", id: generateEventId(), segmentId: toolSegId, toolCallId, name: "read_file", output: "export function Button() {\n  return <button>Click</button>\n}", timestamp: Date.now() })
 
-          typeText("I've read the Button component. It's a simple functional component that renders a button with variant props. The types look correct.",
-            (t) => emitDelta(t, cb),
-            () => emitDone(cb)
+          typeText("I've read the Button component. It's a simple functional component that renders a button with variant props. The types look correct.", summarySegId,
+            (t) => emitDelta(t, summarySegId, cb),
+            () => {
+              cb.onEvent({ type: "agent.completed", id: generateEventId(), timestamp: Date.now() })
+              emitDone(summarySegId, cb)
+            }
           )
         }, 2000))
       }
@@ -131,25 +145,30 @@ export const readFile: Scenario = (cb) => {
   return cleanup
 }
 
-// Scenario 04: Edit file
+// Case 2b: Text → one edit → text
 export const editFile: Scenario = (cb) => {
   const timers: ReturnType<typeof setTimeout>[] = []
   const cleanup = () => timers.forEach(clearTimeout)
+  const textSegId = generateEventId()
+  const toolSegId = generateEventId()
+  const summarySegId = generateEventId()
   const toolCallId = generateEventId()
 
   timers.push(setTimeout(() => {
-    typeText("I'll update that component for you.",
-      (t) => emitDelta(t, cb),
+    typeText("I'll update that component for you.", textSegId,
+      (t) => emitDelta(t, textSegId, cb),
       () => {
-        cb.onEvent({ type: "tool.started", id: generateEventId(), toolCallId, name: "edit_file", input: "src/components/Input.tsx", timestamp: Date.now() })
+        cb.onEvent({ type: "tool.started", id: generateEventId(), segmentId: toolSegId, toolCallId, name: "edit_file", input: "src/components/Input.tsx", timestamp: Date.now() })
 
         timers.push(setTimeout(() => {
-          cb.onEvent({ type: "tool.completed", id: generateEventId(), toolCallId, name: "edit_file", output: "Updated props interface", timestamp: Date.now() })
-          cb.onEvent({ type: "agent.completed", id: generateEventId(), timestamp: Date.now() })
+          cb.onEvent({ type: "tool.completed", id: generateEventId(), segmentId: toolSegId, toolCallId, name: "edit_file", output: "Updated props interface", timestamp: Date.now() })
 
-          typeText("Done! I've updated the Input component with the new props interface. The changes include better TypeScript support and improved accessibility attributes.",
-            (t) => emitDelta(t, cb),
-            () => emitDone(cb)
+          typeText("Done! I've updated the Input component with the new props interface.", summarySegId,
+            (t) => emitDelta(t, summarySegId, cb),
+            () => {
+              cb.onEvent({ type: "agent.completed", id: generateEventId(), timestamp: Date.now() })
+              emitDone(summarySegId, cb)
+            }
           )
         }, 3000))
       }
@@ -159,108 +178,44 @@ export const editFile: Scenario = (cb) => {
   return cleanup
 }
 
-// Scenario 05: Multiple tools (sequential)
-export const multipleTools: Scenario = (cb) => {
+// Case 3: Text → tool → text → tool → text (interleaved)
+export const interleavedTools: Scenario = (cb) => {
   const timers: ReturnType<typeof setTimeout>[] = []
   const cleanup = () => timers.forEach(clearTimeout)
+  const textSeg1 = generateEventId()
+  const toolSeg1 = generateEventId()
+  const textSeg2 = generateEventId()
+  const toolSeg2 = generateEventId()
+  const textSeg3 = generateEventId()
   const readId = generateEventId()
   const editId = generateEventId()
 
   timers.push(setTimeout(() => {
-    typeText("Let me read the file first, then make the edits.",
-      (t) => emitDelta(t, cb),
+    typeText("Let me read the file first.", textSeg1,
+      (t) => emitDelta(t, textSeg1, cb),
       () => {
-        cb.onEvent({ type: "tool.started", id: generateEventId(), toolCallId: readId, name: "read_file", input: "src/utils/helpers.ts", timestamp: Date.now() })
+        cb.onEvent({ type: "tool.started", id: generateEventId(), segmentId: toolSeg1, toolCallId: readId, name: "read_file", input: "src/utils/helpers.ts", timestamp: Date.now() })
 
         timers.push(setTimeout(() => {
-          cb.onEvent({ type: "tool.completed", id: generateEventId(), toolCallId: readId, name: "read_file", timestamp: Date.now() })
+          cb.onEvent({ type: "tool.completed", id: generateEventId(), segmentId: toolSeg1, toolCallId: readId, name: "read_file", output: "export function helpers() { ... }", timestamp: Date.now() })
 
-          timers.push(setTimeout(() => {
-            cb.onEvent({ type: "tool.started", id: generateEventId(), toolCallId: editId, name: "edit_file", input: "src/utils/helpers.ts", timestamp: Date.now() })
-
-            timers.push(setTimeout(() => {
-              cb.onEvent({ type: "tool.completed", id: generateEventId(), toolCallId: editId, name: "edit_file", timestamp: Date.now() })
-              cb.onEvent({ type: "agent.completed", id: generateEventId(), timestamp: Date.now() })
-
-              typeText("I've read the helpers file and updated the utility functions. Added proper error handling and improved the type definitions.",
-                (t) => emitDelta(t, cb),
-                () => emitDone(cb)
-              )
-            }, 2500))
-          }, 500))
-        }, 2000))
-      }
-    )
-  }, 500))
-
-  return cleanup
-}
-
-// Scenario 06: Parallel tools (sequential internally)
-export const parallelTools: Scenario = (cb) => {
-  const timers: ReturnType<typeof setTimeout>[] = []
-  const cleanup = () => timers.forEach(clearTimeout)
-  const read1Id = generateEventId()
-  const read2Id = generateEventId()
-  const editId = generateEventId()
-
-  timers.push(setTimeout(() => {
-    typeText("I'll check both files and update them.",
-      (t) => emitDelta(t, cb),
-      () => {
-        cb.onEvent({ type: "tool.started", id: generateEventId(), toolCallId: read1Id, name: "read_file", input: "src/components/Header.tsx", timestamp: Date.now() })
-
-        timers.push(setTimeout(() => {
-          cb.onEvent({ type: "tool.completed", id: generateEventId(), toolCallId: read1Id, name: "read_file", timestamp: Date.now() })
-
-          timers.push(setTimeout(() => {
-            cb.onEvent({ type: "tool.started", id: generateEventId(), toolCallId: read2Id, name: "read_file", input: "src/components/Footer.tsx", timestamp: Date.now() })
-
-            timers.push(setTimeout(() => {
-              cb.onEvent({ type: "tool.completed", id: generateEventId(), toolCallId: read2Id, name: "read_file", timestamp: Date.now() })
+          typeText("Now I see the issue. Let me fix it.", textSeg2,
+            (t) => emitDelta(t, textSeg2, cb),
+            () => {
+              cb.onEvent({ type: "tool.started", id: generateEventId(), segmentId: toolSeg2, toolCallId: editId, name: "edit_file", input: "src/utils/helpers.ts", timestamp: Date.now() })
 
               timers.push(setTimeout(() => {
-                cb.onEvent({ type: "tool.started", id: generateEventId(), toolCallId: editId, name: "edit_file", input: "src/components/Header.tsx", timestamp: Date.now() })
+                cb.onEvent({ type: "tool.completed", id: generateEventId(), segmentId: toolSeg2, toolCallId: editId, name: "edit_file", output: "Fixed error handling", timestamp: Date.now() })
 
-                timers.push(setTimeout(() => {
-                  cb.onEvent({ type: "tool.completed", id: generateEventId(), toolCallId: editId, name: "edit_file", timestamp: Date.now() })
-                  cb.onEvent({ type: "agent.completed", id: generateEventId(), timestamp: Date.now() })
-
-                  typeText("I've reviewed both files and updated the Header component. The Footer looks good as is.",
-                    (t) => emitDelta(t, cb),
-                    () => emitDone(cb)
-                  )
-                }, 2000))
-              }, 500))
-            }, 1500))
-          }, 500))
-        }, 1500))
-      }
-    )
-  }, 500))
-
-  return cleanup
-}
-
-// Scenario 07: Tool failure
-export const toolFailure: Scenario = (cb) => {
-  const timers: ReturnType<typeof setTimeout>[] = []
-  const cleanup = () => timers.forEach(clearTimeout)
-  const toolCallId = generateEventId()
-
-  timers.push(setTimeout(() => {
-    typeText("Let me try to read that file...",
-      (t) => emitDelta(t, cb),
-      () => {
-        cb.onEvent({ type: "tool.started", id: generateEventId(), toolCallId, name: "read_file", input: "src/missing.tsx", timestamp: Date.now() })
-
-        timers.push(setTimeout(() => {
-          cb.onEvent({ type: "tool.failed", id: generateEventId(), toolCallId, name: "read_file", error: "File not found: src/missing.tsx", timestamp: Date.now() })
-          cb.onEvent({ type: "agent.completed", id: generateEventId(), timestamp: Date.now() })
-
-          typeText("I couldn't find the file. It may have been moved or deleted. Could you check the path and try again?",
-            (t) => emitDelta(t, cb),
-            () => emitDone(cb)
+                typeText("All done. I've read the helpers file and fixed the error handling.", textSeg3,
+                  (t) => emitDelta(t, textSeg3, cb),
+                  () => {
+                    cb.onEvent({ type: "agent.completed", id: generateEventId(), timestamp: Date.now() })
+                    emitDone(textSeg3, cb)
+                  }
+                )
+              }, 2500))
+            }
           )
         }, 2000))
       }
@@ -270,14 +225,107 @@ export const toolFailure: Scenario = (cb) => {
   return cleanup
 }
 
-// Scenario 08: Agent failure
+// Case 4: Multiple tool calls fired in parallel within one group
+export const parallelTools: Scenario = (cb) => {
+  const timers: ReturnType<typeof setTimeout>[] = []
+  const cleanup = () => timers.forEach(clearTimeout)
+  const textSegId = generateEventId()
+  const toolSegId = generateEventId()
+  const summarySegId = generateEventId()
+  const read1Id = generateEventId()
+  const read2Id = generateEventId()
+
+  timers.push(setTimeout(() => {
+    typeText("I'll check both files at once.", textSegId,
+      (t) => emitDelta(t, textSegId, cb),
+      () => {
+        cb.onEvent({ type: "tool.started", id: generateEventId(), segmentId: toolSegId, toolCallId: read1Id, name: "read_file", input: "src/components/Header.tsx", timestamp: Date.now() })
+        cb.onEvent({ type: "tool.started", id: generateEventId(), segmentId: toolSegId, toolCallId: read2Id, name: "read_file", input: "src/components/Footer.tsx", timestamp: Date.now() })
+
+        timers.push(setTimeout(() => {
+          cb.onEvent({ type: "tool.completed", id: generateEventId(), segmentId: toolSegId, toolCallId: read1Id, name: "read_file", output: "export function Header() { ... }", timestamp: Date.now() })
+
+          timers.push(setTimeout(() => {
+            cb.onEvent({ type: "tool.completed", id: generateEventId(), segmentId: toolSegId, toolCallId: read2Id, name: "read_file", output: "export function Footer() { ... }", timestamp: Date.now() })
+
+            typeText("I've reviewed both components. They look good.", summarySegId,
+              (t) => emitDelta(t, summarySegId, cb),
+              () => {
+                cb.onEvent({ type: "agent.completed", id: generateEventId(), timestamp: Date.now() })
+                emitDone(summarySegId, cb)
+              }
+            )
+          }, 1500))
+        }, 2000))
+      }
+    )
+  }, 500))
+
+  return cleanup
+}
+
+// Case 5: Tool failure followed by recovery text
+export const toolFailure: Scenario = (cb) => {
+  const timers: ReturnType<typeof setTimeout>[] = []
+  const cleanup = () => timers.forEach(clearTimeout)
+  const textSeg1 = generateEventId()
+  const toolSegId = generateEventId()
+  const textSeg2 = generateEventId()
+  const toolCallId = generateEventId()
+
+  timers.push(setTimeout(() => {
+    typeText("Let me try to read that file...", textSeg1,
+      (t) => emitDelta(t, textSeg1, cb),
+      () => {
+        cb.onEvent({ type: "tool.started", id: generateEventId(), segmentId: toolSegId, toolCallId, name: "read_file", input: "src/missing.tsx", timestamp: Date.now() })
+
+        timers.push(setTimeout(() => {
+          cb.onEvent({ type: "tool.failed", id: generateEventId(), segmentId: toolSegId, toolCallId, name: "read_file", error: "File not found: src/missing.tsx", timestamp: Date.now() })
+
+          typeText("I couldn't find the file. It may have been moved or deleted. Could you check the path and try again?", textSeg2,
+            (t) => emitDelta(t, textSeg2, cb),
+            () => {
+              cb.onEvent({ type: "agent.completed", id: generateEventId(), timestamp: Date.now() })
+              emitDone(textSeg2, cb)
+            }
+          )
+        }, 2000))
+      }
+    )
+  }, 500))
+
+  return cleanup
+}
+
+// Case 6: Tool calls only, zero text
+export const toolOnly: Scenario = (cb) => {
+  const timers: ReturnType<typeof setTimeout>[] = []
+  const cleanup = () => timers.forEach(clearTimeout)
+  const toolSegId = generateEventId()
+  const toolCallId = generateEventId()
+
+  timers.push(setTimeout(() => {
+    cb.onEvent({ type: "tool.started", id: generateEventId(), segmentId: toolSegId, toolCallId, name: "read_file", input: "src/config.ts", timestamp: Date.now() })
+
+    timers.push(setTimeout(() => {
+      cb.onEvent({ type: "tool.completed", id: generateEventId(), segmentId: toolSegId, toolCallId, name: "read_file", output: "export const config = { ... }", timestamp: Date.now() })
+      cb.onEvent({ type: "agent.completed", id: generateEventId(), timestamp: Date.now() })
+      cb.onEvent({ type: "assistant.delta", id: generateEventId(), segmentId: generateEventId(), text: "__DONE__", timestamp: Date.now() })
+    }, 2000))
+  }, 500))
+
+  return cleanup
+}
+
+// Agent failure
 export const agentFailure: Scenario = (cb) => {
   const timers: ReturnType<typeof setTimeout>[] = []
   const cleanup = () => timers.forEach(clearTimeout)
+  const segId = generateEventId()
 
   timers.push(setTimeout(() => {
-    typeText("Let me analyze that for you...",
-      (t) => emitDelta(t, cb),
+    typeText("Let me analyze that for you...", segId,
+      (t) => emitDelta(t, segId, cb),
       () => {
         timers.push(setTimeout(() => {
           cb.onEvent({ type: "agent.error", id: generateEventId(), error: "Rate limit exceeded. Please try again in 30 seconds.", timestamp: Date.now() })
@@ -289,10 +337,11 @@ export const agentFailure: Scenario = (cb) => {
   return cleanup
 }
 
-// Scenario 09: Cancellation (events stop mid-stream)
+// Cancellation
 export const cancellation: Scenario = (cb) => {
   const timers: ReturnType<typeof setTimeout>[] = []
   let cancelled = false
+  const segId = generateEventId()
 
   const cleanup = () => {
     cancelled = true
@@ -311,11 +360,11 @@ export const cancellation: Scenario = (cb) => {
         return
       }
       if (currentIndex < chars.length) {
-        emitDelta(chars.slice(0, currentIndex + 1).join(""), cb)
+        emitDelta(chars.slice(0, currentIndex + 1).join(""), segId, cb)
         currentIndex++
       } else {
         clearInterval(interval)
-        emitDone(cb)
+        emitDone(segId, cb)
       }
     }, 50)
 
@@ -325,10 +374,11 @@ export const cancellation: Scenario = (cb) => {
   return cleanup
 }
 
-// Scenario 10: Huge response
+// Huge response
 export const hugeResponse: Scenario = (cb) => {
   const timers: ReturnType<typeof setTimeout>[] = []
   const cleanup = () => timers.forEach(clearTimeout)
+  const segId = generateEventId()
 
   timers.push(setTimeout(() => {
     const hugeText = `I've completed a comprehensive review of your codebase. Here are my detailed findings:
@@ -359,9 +409,12 @@ The project follows a clean modular structure with clear separation of concerns.
 
 The codebase is in good shape overall. These improvements would make it production-ready.`
 
-    typeText(hugeText,
-      (t) => emitDelta(t, cb),
-      () => emitDone(cb)
+    typeText(hugeText, segId,
+      (t) => emitDelta(t, segId, cb),
+      () => {
+        cb.onEvent({ type: "agent.completed", id: generateEventId(), timestamp: Date.now() })
+        emitDone(segId, cb)
+      }
     )
   }, 500))
 
@@ -384,11 +437,14 @@ export function selectScenario(message: string): Scenario {
   if (lower.includes("big") || lower.includes("large") || lower.includes("huge") || lower.includes("long")) {
     return hugeResponse
   }
+  if (lower.includes("interleave") || lower.includes("alternating") || lower.includes("both")) {
+    return interleavedTools
+  }
   if (lower.includes("parallel") || lower.includes("concurrent")) {
     return parallelTools
   }
-  if (lower.includes("multiple") || lower.includes("many") || lower.includes("both")) {
-    return multipleTools
+  if (lower.includes("only") || lower.includes("no text") || lower.includes("silent")) {
+    return toolOnly
   }
   if (lower.includes("edit") || lower.includes("modify") || lower.includes("change") || lower.includes("update")) {
     return editFile

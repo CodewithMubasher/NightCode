@@ -9,6 +9,7 @@ export type RuntimeEvent =
 export interface AssistantDeltaEvent {
   type: "assistant.delta"
   id: string
+  segmentId: string
   text: string
   timestamp: number
 }
@@ -16,18 +17,20 @@ export interface AssistantDeltaEvent {
 export interface ToolStartedEvent {
   type: "tool.started"
   id: string
+  segmentId: string
   toolCallId: string
   name: string
-  input?: string
+  input?: unknown
   timestamp: number
 }
 
 export interface ToolCompletedEvent {
   type: "tool.completed"
   id: string
+  segmentId: string
   toolCallId: string
   name: string
-  output?: string
+  output?: unknown
   duration?: number
   timestamp: number
 }
@@ -35,6 +38,7 @@ export interface ToolCompletedEvent {
 export interface ToolFailedEvent {
   type: "tool.failed"
   id: string
+  segmentId: string
   toolCallId: string
   name: string
   error: string

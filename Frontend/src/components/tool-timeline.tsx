@@ -1,14 +1,16 @@
 import { useState, useEffect, useRef } from "react"
 import { ChevronDown } from "lucide-react"
 import { TimelineNode } from "@/components/timeline-node"
+import { getToolRenderer, computeToolSummary } from "@/lib/tool-registry"
+import type { ToolCallEntry } from "@/types/message"
 
-interface ToolEvent {
+interface LiveToolEvent {
   id: string
   toolCallId: string
   type: "tool.started" | "tool.completed" | "tool.failed"
   name: string
-  input?: string
-  output?: string
+  input?: unknown
+  output?: unknown
   error?: string
   duration?: number
   timestamp: number
@@ -17,13 +19,24 @@ interface ToolEvent {
 interface ToolTimelineProps {
   isAgentStarted: boolean
   isAgentCompleted: boolean
-  toolEvents: ToolEvent[]
+  toolEvents: LiveToolEvent[]
+  toolCalls?: ToolCallEntry[]
   summary?: string
   startCollapsed?: boolean
 }
 
-export function ToolTimeline({ isAgentStarted, isAgentCompleted, toolEvents, summary: summaryProp, startCollapsed = true }: ToolTimelineProps) {
+function areCallsParallel(calls: ToolCallEntry[]): boolean {
+  if (calls.length <= 1) return false
+  const sorted = [...calls].sort((a, b) => a.startedAt - b.startedAt)
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i].startedAt - sorted[i - 1].startedAt < 500) return true
+  }
+  return false
+}
+
+export function ToolTimeline({ isAgentStarted, isAgentCompleted, toolEvents, toolCalls, summary: summaryProp, startCollapsed = true }: ToolTimelineProps) {
   const [isExpanded, setIsExpanded] = useState(!startCollapsed)
+  const [expandedDetail, setExpandedDetail] = useState<string | null>(null)
   const userToggledRef = useRef(false)
 
   useEffect(() => {
@@ -39,30 +52,22 @@ export function ToolTimeline({ isAgentStarted, isAgentCompleted, toolEvents, sum
 
   if (!isAgentStarted) return null
 
-  const hasFailed = toolEvents.some((e) => e.type === "tool.failed")
+  const displayCalls: ToolCallEntry[] = toolCalls ?? toolEvents.map((e) => ({
+    toolCallId: e.toolCallId,
+    name: e.name,
+    status: e.type === "tool.failed" ? "failed" as const : e.type === "tool.completed" ? "completed" as const : "running" as const,
+    input: e.input,
+    output: e.output,
+    error: e.error,
+    startedAt: e.timestamp,
+  }))
 
-  const getToolDisplay = (event: ToolEvent) => {
-    const isError = event.type === "tool.failed"
-    switch (event.name) {
-      case "read_file":
-        return { icon: "file-text" as const, label: "Reading file", fileName: event.input, isError, error: event.error }
-      case "edit_file":
-        return { icon: "file-pen" as const, label: "Edit file", fileName: event.input, linesRemoved: 7, linesAdded: 13, isError, error: event.error }
-      default:
-        return { icon: "file-text" as const, label: event.name, isError, error: event.error }
-    }
-  }
+  if (displayCalls.length === 0) return null
 
-  const failedCount = toolEvents.filter((e) => e.type === "tool.failed").length
-  const successCount = toolEvents.length - failedCount
-  const allFailed = failedCount > 0 && successCount === 0
-  const hasMixed = failedCount > 0 && successCount > 0
+  const hasFailed = displayCalls.some((c) => c.status === "failed")
+  const isParallel = areCallsParallel(displayCalls)
 
-  const summary = summaryProp ?? (allFailed
-    ? `Failed (${failedCount})`
-    : hasMixed
-      ? `${successCount} done, ${failedCount} failed`
-      : "Working...")
+  const summary = summaryProp ?? computeToolSummary(displayCalls)
 
   return (
     <div>
@@ -87,37 +92,44 @@ export function ToolTimeline({ isAgentStarted, isAgentCompleted, toolEvents, sum
       `}</style>
       <button
         onClick={toggleExpanded}
-        className={`flex items-center gap-1.5 cursor-pointer hover:text-white/70 ${hasFailed ? "text-red-400/70" : "text-white/50"}`}
+        className={`flex items-center gap-1.5 -pt-1 cursor-pointer hover:text-white/70 ${hasFailed ? "text-red-400/70" : "text-white/50"}`}
       >
         <span className={`text-[14px] ${!isAgentCompleted && !hasFailed ? "tl-shimmer" : ""}`}>{summary}</span>
         <ChevronDown className={`size-3 ${hasFailed ? "text-red-400/50" : "text-white/50"} transition-transform duration-200 ${isExpanded ? "" : "-rotate-90"}`} />
       </button>
 
-      <div className={`ml-1 grid transition-all duration-200 ease-in-out ${isExpanded ? "grid-rows-[1fr] opacity-100 mt-2 mb-3" : "grid-rows-[0fr] opacity-0"}`}>
-        <div className="overflow-hidden">
-          {toolEvents.map((event, index) => {
-            const display = getToolDisplay(event)
-            const isLastEvent = index === toolEvents.length - 1
+      <div className={`ml-1 grid transition-all duration-200 ease-in-out ${isExpanded ? "grid-rows-[1fr] opacity-100 mt-1 mb-2" : "grid-rows-[0fr] opacity-0"}`}>
+        <div className="overflow-hidden pt-0.5 pb-0">
+          {displayCalls.map((call, index) => {
+            const renderer = getToolRenderer(call.name)
+            const isError = call.status === "failed"
+            const isLast = index === displayCalls.length - 1
+            const fileName = renderer.getFileName?.(call)
+            const isDetailExpanded = expandedDetail === call.toolCallId
+            const detail = !isError && renderer.renderDetail ? renderer.renderDetail(call) : null
 
             return (
               <TimelineNode
-                key={event.id}
-                icon={display.icon}
-                label={display.label}
-                fileName={display.fileName}
-                linesRemoved={display.linesRemoved}
-                linesAdded={display.linesAdded}
-                error={display.error}
-                isError={display.isError}
-                isLast={isLastEvent && !isAgentCompleted}
-                showLine={!(isLastEvent && !isAgentCompleted)}
+                key={call.toolCallId}
+                iconComponent={renderer.icon}
+                iconType={isError ? "error" : call.status === "running" ? "loading" : "default"}
+                label={renderer.label}
+                fileName={fileName}
+                error={call.error}
+                isError={isError}
+                isLast={isLast && !isAgentCompleted}
+                showLine={!(isLast && !isAgentCompleted)}
+                isParallel={isParallel}
+                detail={detail}
+                isDetailExpanded={isDetailExpanded}
+                onToggleDetail={detail ? () => setExpandedDetail(isDetailExpanded ? null : call.toolCallId) : undefined}
               />
             )
           })}
 
           {isAgentCompleted && hasFailed && (
             <TimelineNode
-              icon="check"
+              iconType="check"
               label="Failed"
               isError={true}
               isLast={true}
@@ -127,8 +139,8 @@ export function ToolTimeline({ isAgentStarted, isAgentCompleted, toolEvents, sum
 
           {isAgentCompleted && !hasFailed && (
             <TimelineNode
-              icon="check"
-              label="Done ✓"
+              iconType="check"
+              label="Done "
               isLast={true}
               showLine={false}
             />

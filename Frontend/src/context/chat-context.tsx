@@ -1,11 +1,11 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from "react"
-import { type Chat, type Message, type MessagePart, generateId, truncateTitle } from "@/types/message"
+import { type Chat, type Message, type MessagePart, type TurnSegment, generateId, truncateTitle } from "@/types/message"
 
 interface ChatContextType {
   chats: Chat[]
   getChat: (id: string) => Chat | undefined
   createChat: (firstMessage: string) => string
-  addMessage: (chatId: string, role: "user" | "assistant", parts: MessagePart[]) => void
+  addMessage: (chatId: string, role: "user" | "assistant", parts: MessagePart[], segments?: TurnSegment[]) => void
 }
 
 const ChatContext = createContext<ChatContextType | null>(null)
@@ -29,11 +29,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     return id
   }, [])
 
-  const addMessage = useCallback((chatId: string, role: "user" | "assistant", parts: MessagePart[]) => {
+  const addMessage = useCallback((chatId: string, role: "user" | "assistant", parts: MessagePart[], segments?: TurnSegment[]) => {
     const newMessage: Message = {
       id: generateId(),
       role,
       parts,
+      segments,
       timestamp: Date.now(),
     }
     setChats((prev) =>

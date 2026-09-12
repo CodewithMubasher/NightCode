@@ -1,3 +1,18 @@
+export interface ToolCallEntry {
+  toolCallId: string
+  name: string
+  status: "running" | "completed" | "failed"
+  input?: unknown
+  output?: unknown
+  error?: string
+  startedAt: number
+  completedAt?: number
+}
+
+export type TurnSegment =
+  | { type: "text"; id: string; text: string }
+  | { type: "tool-group"; id: string; calls: ToolCallEntry[] }
+
 export interface TextPart {
   type: "text"
   text: string
@@ -42,6 +57,7 @@ export interface Message {
   id: string
   role: "user" | "assistant"
   parts: MessagePart[]
+  segments?: TurnSegment[]
   timestamp: number
 }
 
