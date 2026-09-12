@@ -40,7 +40,6 @@ export function TimelineNode({
   onToggleDetail,
 }: TimelineNodeProps) {
   const Icon = iconComponent ?? legacyIconMap[icon ?? "file-text"] ?? FileText
-  const isSpinning = iconType === "loading" || icon === "loading"
   const showCheck = iconType === "check" || icon === "check"
   const showError = iconType === "error" || isError
   const hasDetail = !!detail
@@ -49,11 +48,13 @@ export function TimelineNode({
   return (
     <div className="flex">
       <div className="flex flex-col items-center w-4 mr-2 mt-2 -mb-2">
-        <div className={`flex-shrink-0 ${isSpinning ? "animate-spin" : ""}`}>
+        <div className="flex-shrink-0">
           {showCheck ? (
             <CircleCheck className={`size-4 ${showError ? "text-red-400" : "text-white/60"}`} />
           ) : showError ? (
             <AlertCircle className="size-4 text-red-400" />
+          ) : iconType === "loading" || icon === "loading" ? (
+            <Loader2 className="size-4 text-white/60 animate-spin" />
           ) : (
             <Icon className="size-4 text-white/60" />
           )}
@@ -89,6 +90,10 @@ export function TimelineNode({
         {hasDetail && (
           <div className={`grid transition-all duration-200 ease-in-out ${isDetailExpanded ? "grid-rows-[1fr] opacity-100 mt-1" : "grid-rows-[0fr] opacity-0"}`}>
             <div className="overflow-hidden">
+              <style>{`
+                .hide-scrollbar::-webkit-scrollbar { display: none; }
+                .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+              `}</style>
               {detail}
             </div>
           </div>

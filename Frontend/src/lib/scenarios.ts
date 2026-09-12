@@ -421,10 +421,110 @@ The codebase is in good shape overall. These improvements would make it producti
   return cleanup
 }
 
+// Full workflow: text → read file → text (describe) → 3 edit files → text
+export const fullWorkflow: Scenario = (cb) => {
+  const timers: ReturnType<typeof setTimeout>[] = []
+  const cleanup = () => timers.forEach(clearTimeout)
+  const textSeg1 = generateEventId()
+  const toolSeg1 = generateEventId()
+  const textSeg2 = generateEventId()
+  const toolSeg2 = generateEventId()
+  const textSeg3 = generateEventId()
+  const readId = generateEventId()
+  const editId1 = generateEventId()
+  const editId2 = generateEventId()
+  const editId3 = generateEventId()
+
+  timers.push(setTimeout(() => {
+    typeText("Let me start by reading the component file to understand its current structure.", textSeg1,
+      (t) => emitDelta(t, textSeg1, cb),
+      () => {
+        cb.onEvent({ type: "tool.started", id: generateEventId(), segmentId: toolSeg1, toolCallId: readId, name: "read_file", input: "src/components/AuthForm.tsx", timestamp: Date.now() })
+
+        timers.push(setTimeout(() => {
+          cb.onEvent({ type: "tool.completed", id: generateEventId(), segmentId: toolSeg1, toolCallId: readId, name: "read_file", output: "export function AuthForm({ onSubmit }: Props) { const [email, setEmail] = useState(\"\"); return <form>...</form> }", timestamp: Date.now() })
+
+          typeText("I can see the AuthForm component. It has a basic email/password form with useState hooks, but it's missing validation, error handling, and a loading state. Let me add all three.", textSeg2,
+            (t) => emitDelta(t, textSeg2, cb),
+            () => {
+              cb.onEvent({ type: "tool.started", id: generateEventId(), segmentId: toolSeg2, toolCallId: editId1, name: "edit_file", input: "src/components/AuthForm.tsx", timestamp: Date.now() })
+
+              timers.push(setTimeout(() => {
+                cb.onEvent({ type: "tool.completed", id: generateEventId(), segmentId: toolSeg2, toolCallId: editId1, name: "edit_file", output: "Added email validation regex and password length check", timestamp: Date.now() })
+
+                cb.onEvent({ type: "tool.started", id: generateEventId(), segmentId: toolSeg2, toolCallId: editId2, name: "edit_file", input: "src/components/AuthForm.tsx", timestamp: Date.now() })
+
+                timers.push(setTimeout(() => {
+                  cb.onEvent({ type: "tool.completed", id: generateEventId(), segmentId: toolSeg2, toolCallId: editId2, name: "edit_file", output: "Wrapped onSubmit in try/catch with error state display", timestamp: Date.now() })
+
+                  cb.onEvent({ type: "tool.started", id: generateEventId(), segmentId: toolSeg2, toolCallId: editId3, name: "edit_file", input: "src/components/AuthForm.tsx", timestamp: Date.now() })
+
+                  timers.push(setTimeout(() => {
+                    cb.onEvent({ type: "tool.completed", id: generateEventId(), segmentId: toolSeg2, toolCallId: editId3, name: "edit_file", output: "Added isLoading prop and disabled submit button during request", timestamp: Date.now() })
+
+                    typeText("All three changes are in. The form now validates email format, enforces an 8-character minimum password, shows inline error messages, and disables the button while a request is in flight.", textSeg3,
+                      (t) => emitDelta(t, textSeg3, cb),
+                      () => {
+                        cb.onEvent({ type: "agent.completed", id: generateEventId(), timestamp: Date.now() })
+                        emitDone(textSeg3, cb)
+                      }
+                    )
+                  }, 2000))
+                }, 2000))
+              }, 2000))
+            }
+          )
+        }, 2500))
+      }
+    )
+  }, 500))
+
+  return cleanup
+}
+
+// Ran command: text → shell command → text
+export const ranCommand: Scenario = (cb) => {
+  const timers: ReturnType<typeof setTimeout>[] = []
+  const cleanup = () => timers.forEach(clearTimeout)
+  const textSeg1 = generateEventId()
+  const toolSeg = generateEventId()
+  const textSeg2 = generateEventId()
+  const shellId = generateEventId()
+
+  timers.push(setTimeout(() => {
+    typeText("Let me set up the project structure and copy the files into place.", textSeg1,
+      (t) => emitDelta(t, textSeg1, cb),
+      () => {
+        cb.onEvent({ type: "tool.started", id: generateEventId(), segmentId: toolSeg, toolCallId: shellId, name: "shell", input: "mkdir -p /home/claude/fix && cp /mnt/user-data/uploads/timeline-node.tsx /home/claude/fix/timeline-node.tsx && cp /mnt/user-data/uploads/tool-timeline.tsx /home/claude/fix/tool-timeline.tsx", timestamp: Date.now() })
+
+        timers.push(setTimeout(() => {
+          cb.onEvent({ type: "tool.completed", id: generateEventId(), segmentId: toolSeg, toolCallId: shellId, name: "shell", output: "exit code 0", timestamp: Date.now() })
+
+          typeText("Done. Both files have been copied to the working directory.", textSeg2,
+            (t) => emitDelta(t, textSeg2, cb),
+            () => {
+              cb.onEvent({ type: "agent.completed", id: generateEventId(), timestamp: Date.now() })
+              emitDone(textSeg2, cb)
+            }
+          )
+        }, 3000))
+      }
+    )
+  }, 500))
+
+  return cleanup
+}
+
 // Scenario selector based on user message
 export function selectScenario(message: string): Scenario {
   const lower = message.toLowerCase()
 
+  if (lower.includes("run") || lower.includes("command") || lower.includes("shell") || lower.includes("exec")) {
+    return ranCommand
+  }
+  if (lower.includes("full") || lower.includes("workflow")) {
+    return fullWorkflow
+  }
   if (lower.includes("fail") || lower.includes("error") || lower.includes("broken")) {
     return toolFailure
   }

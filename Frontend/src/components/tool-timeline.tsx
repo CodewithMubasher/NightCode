@@ -113,7 +113,7 @@ export function ToolTimeline({ isAgentStarted, isAgentCompleted, toolEvents, too
                 key={call.toolCallId}
                 iconComponent={renderer.icon}
                 iconType={isError ? "error" : call.status === "running" ? "loading" : "default"}
-                label={renderer.label}
+                label={renderer.getLabel?.(call) ?? renderer.label}
                 fileName={fileName}
                 error={call.error}
                 isError={isError}
