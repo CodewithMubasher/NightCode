@@ -1,5 +1,6 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Copy, Check } from "lucide-react"
+import { codeToHtml } from "shiki"
 
 interface CodeBlockProps {
   language?: string
@@ -8,6 +9,20 @@ interface CodeBlockProps {
 
 export function CodeBlock({ language, children }: CodeBlockProps) {
   const [copied, setCopied] = useState(false)
+  const [html, setHtml] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    codeToHtml(children, {
+      lang: language || "text",
+      theme: "github-dark",
+    }).then((result) => {
+      if (!cancelled) setHtml(result)
+    }).catch(() => {
+      if (!cancelled) setHtml(null)
+    })
+    return () => { cancelled = true }
+  }, [children, language])
 
   const handleCopy = () => {
     navigator.clipboard.writeText(children)
@@ -27,9 +42,16 @@ export function CodeBlock({ language, children }: CodeBlockProps) {
           <span>{copied ? "Copied" : "Copy"}</span>
         </button>
       </div>
-      <pre className="p-4 overflow-x-auto text-[13px] leading-5 font-mono text-white/80">
-        <code>{children}</code>
-      </pre>
+      {html ? (
+        <div
+          className="text-[13px] leading-5 font-mono scrollbar-hide [&_pre]:p-4 [&_pre]:whitespace-pre-wrap [&_pre]:break-all [&_pre]:!bg-transparent [&_pre]:overflow-hidden"
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+      ) : (
+        <pre className="p-4 whitespace-pre-wrap break-all text-[13px] leading-5 font-mono text-white/80 overflow-hidden scrollbar-hide">
+          <code>{children}</code>
+        </pre>
+      )}
     </div>
   )
 }

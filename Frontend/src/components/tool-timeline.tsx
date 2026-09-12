@@ -23,6 +23,7 @@ interface ToolTimelineProps {
   toolCalls?: ToolCallEntry[]
   summary?: string
   startCollapsed?: boolean
+  onOpenArtifact?: (call: ToolCallEntry) => void
 }
 
 function areCallsParallel(calls: ToolCallEntry[]): boolean {
@@ -34,7 +35,7 @@ function areCallsParallel(calls: ToolCallEntry[]): boolean {
   return false
 }
 
-export function ToolTimeline({ isAgentStarted, isAgentCompleted, toolEvents, toolCalls, summary: summaryProp, startCollapsed = true }: ToolTimelineProps) {
+export function ToolTimeline({ isAgentStarted, isAgentCompleted, toolEvents, toolCalls, summary: summaryProp, startCollapsed = true, onOpenArtifact }: ToolTimelineProps) {
   const [isExpanded, setIsExpanded] = useState(!startCollapsed)
   const [expandedDetail, setExpandedDetail] = useState<string | null>(null)
   const userToggledRef = useRef(false)
@@ -123,6 +124,7 @@ export function ToolTimeline({ isAgentStarted, isAgentCompleted, toolEvents, too
                 detail={detail}
                 isDetailExpanded={isDetailExpanded}
                 onToggleDetail={detail ? () => setExpandedDetail(isDetailExpanded ? null : call.toolCallId) : undefined}
+                onOpenArtifact={call.status !== "running" && onOpenArtifact ? () => onOpenArtifact(call) : undefined}
               />
             )
           })}

@@ -15,6 +15,7 @@ interface TimelineNodeProps {
   detail?: React.ReactNode
   isDetailExpanded?: boolean
   onToggleDetail?: () => void
+  onOpenArtifact?: () => void
 }
 
 const legacyIconMap = {
@@ -38,6 +39,7 @@ export function TimelineNode({
   detail,
   isDetailExpanded = false,
   onToggleDetail,
+  onOpenArtifact,
 }: TimelineNodeProps) {
   const Icon = iconComponent ?? legacyIconMap[icon ?? "file-text"] ?? FileText
   const showCheck = iconType === "check" || icon === "check"
@@ -64,8 +66,8 @@ export function TimelineNode({
 
       <div className="flex-1 min-w-0 mb-2 mt-1.5">
         <div
-          className={`flex items-center gap-1.5 ${hasDetail ? "cursor-pointer hover:opacity-80" : ""}`}
-          onClick={hasDetail ? onToggleDetail : undefined}
+          className={`flex items-center gap-1.5 ${onOpenArtifact || hasDetail ? "cursor-pointer hover:opacity-80" : ""}`}
+          onClick={onOpenArtifact ?? (hasDetail ? onToggleDetail : undefined)}
         >
           <Badge
             variant="secondary"

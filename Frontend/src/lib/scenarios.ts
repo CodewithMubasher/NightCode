@@ -21,8 +21,8 @@ function typeText(
       return
     }
     if (currentIndex < chars.length) {
-      onDelta(chars.slice(0, currentIndex + 1).join(""))
-      currentIndex++
+      currentIndex = Math.min(currentIndex + 3, chars.length)
+      onDelta(chars.slice(0, currentIndex).join(""))
     } else {
       clearInterval(typeInterval)
       onDone()
@@ -49,6 +49,29 @@ function emitDone(segmentId: string, cb: ScenarioCallbacks): RuntimeEvent {
     id: generateEventId(),
     segmentId,
     text: "__DONE__",
+    timestamp: Date.now(),
+  }
+  cb.onEvent(event)
+  return event
+}
+
+function emitArtifact(
+  segmentId: string,
+  name: string,
+  content: string,
+  artifactType: "document" | "code",
+  language: string | undefined,
+  cb: ScenarioCallbacks
+): RuntimeEvent {
+  const event: RuntimeEvent = {
+    type: "artifact.created",
+    id: generateEventId(),
+    segmentId,
+    artifactId: generateEventId(),
+    name,
+    content,
+    artifactType,
+    language,
     timestamp: Date.now(),
   }
   cb.onEvent(event)
@@ -462,6 +485,57 @@ export const fullWorkflow: Scenario = (cb) => {
                   timers.push(setTimeout(() => {
                     cb.onEvent({ type: "tool.completed", id: generateEventId(), segmentId: toolSeg2, toolCallId: editId3, name: "edit_file", output: "Added isLoading prop and disabled submit button during request", timestamp: Date.now() })
 
+                    emitArtifact(textSeg3, "AuthForm.tsx", `import { useState } from "react"
+
+interface Props {
+  onSubmit: (email: string, password: string) => Promise<void>
+}
+
+export function AuthForm({ onSubmit }: Props) {
+  const [email, setEmail] = useState("")
+  const [password, setPassword] = useState("")
+  const [error, setError] = useState<string | null>(null)
+  const [isLoading, setIsLoading] = useState(false)
+
+  const validateEmail = (email: string) => {
+    return /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError(null)
+
+    if (!validateEmail(email)) {
+      setError("Please enter a valid email address")
+      return
+    }
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters")
+      return
+    }
+
+    setIsLoading(true)
+    try {
+      await onSubmit(email, password)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "An error occurred")
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+      <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+      {error && <p className="text-red-500">{error}</p>}
+      <button type="submit" disabled={isLoading}>
+        {isLoading ? "Signing in..." : "Sign in"}
+      </button>
+    </form>
+  )
+}`, "code", "tsx", cb)
+
                     typeText("All three changes are in. The form now validates email format, enforces an 8-character minimum password, shows inline error messages, and disables the button while a request is in flight.", textSeg3,
                       (t) => emitDelta(t, textSeg3, cb),
                       () => {
@@ -515,10 +589,90 @@ export const ranCommand: Scenario = (cb) => {
   return cleanup
 }
 
+// Markdown showcase: headings, lists, inline code, code blocks, bold, etc.
+export const markdownShowcase: Scenario = (cb) => {
+  const timers: ReturnType<typeof setTimeout>[] = []
+  const cleanup = () => timers.forEach(clearTimeout)
+  const segId = generateEventId()
+
+  const text = `## Getting Started with React Hooks
+
+Hooks let you use state and other React features **without writing a class**. Here's what you need to know:
+
+### Key Hooks
+
+- \`useState\` — manages local component state
+- \`useEffect\` — handles side effects like data fetching
+- \`useContext\` — consumes context without nesting
+- \`useRef\` — accesses DOM elements or persists values
+
+### Basic Example
+
+Here's a simple counter using \`useState\`:
+
+\`\`\`tsx
+import { useState } from "react"
+
+function Counter() {
+  const [count, setCount] = useState(0)
+
+  return (
+    <button onClick={() => setCount(count + 1)}>
+      Clicked {count} times
+    </button>
+  )
+}
+\`\`\`
+
+### Rules of Hooks
+
+1. Only call hooks at the **top level** of your function
+2. Only call hooks from **React functions** (components or custom hooks)
+3. Custom hooks must start with \`use\` prefix
+
+> **Tip:** Use the \`eslint-plugin-react-hooks\` lint rule to catch mistakes early.
+
+### Custom Hook Example
+
+You can extract reusable logic into custom hooks:
+
+\`\`\`tsx
+function useLocalStorage<T>(key: string, initial: T) {
+  const [value, setValue] = useState<T>(() => {
+    const stored = localStorage.getItem(key)
+    return stored ? JSON.parse(stored) : initial
+  })
+
+  useEffect(() => {
+    localStorage.setItem(key, JSON.stringify(value))
+  }, [key, value])
+
+  return [value, setValue] as const
+}
+\`\`\`
+
+This lets you share stateful logic between components **without changing your component hierarchy**.`
+
+  timers.push(setTimeout(() => {
+    typeText(text, segId,
+      (t) => emitDelta(t, segId, cb),
+      () => {
+        cb.onEvent({ type: "agent.completed", id: generateEventId(), timestamp: Date.now() })
+        emitDone(segId, cb)
+      }
+    )
+  }, 500))
+
+  return cleanup
+}
+
 // Scenario selector based on user message
 export function selectScenario(message: string): Scenario {
   const lower = message.toLowerCase()
 
+  if (lower.includes("code") || lower.includes("markdown") || lower.includes("format")) {
+    return markdownShowcase
+  }
   if (lower.includes("run") || lower.includes("command") || lower.includes("shell") || lower.includes("exec")) {
     return ranCommand
   }

@@ -5,6 +5,7 @@ export type RuntimeEvent =
   | ToolFailedEvent
   | AgentCompletedEvent
   | AgentErrorEvent
+  | ArtifactCreatedEvent
 
 export interface AssistantDeltaEvent {
   type: "assistant.delta"
@@ -55,6 +56,18 @@ export interface AgentErrorEvent {
   type: "agent.error"
   id: string
   error: string
+  timestamp: number
+}
+
+export interface ArtifactCreatedEvent {
+  type: "artifact.created"
+  id: string
+  segmentId: string
+  artifactId: string
+  name: string
+  content: string
+  artifactType: "document" | "code"
+  language?: string
   timestamp: number
 }
 

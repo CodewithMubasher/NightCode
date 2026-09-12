@@ -50,7 +50,7 @@ function NodeRenderer({ node }: { node: Content | Root }): React.ReactNode {
 
     case "inlineCode":
       return (
-        <code className="px-1.5 py-0.5 mx-0.5 rounded-md bg-white/10 text-primary text-[13px] font-mono">
+        <code className="px-1.5 py-0.5 mx-0.5 rounded-md bg-pink-500/10 text-pink-400 text-[13px] font-mono">
           {node.value}
         </code>
       )

@@ -3,6 +3,7 @@ import { useChats } from "@/context/chat-context"
 import { PromptInput } from "@/components/prompt-input"
 import { ToolTimeline } from "@/components/tool-timeline"
 import { MarkdownRenderer } from "@/components/markdown-renderer"
+import { ArtifactPanel } from "@/components/artifact-panel"
 import {
   MessageScrollerProvider,
   MessageScroller,
@@ -11,10 +12,10 @@ import {
   MessageScrollerItem,
   MessageScrollerButton,
 } from "@/components/ui/message-scroller"
-import { Eclipse, Copy, ThumbsUp, ThumbsDown, RotateCcw, FileCodeIcon } from "lucide-react"
+import { Eclipse, Copy, ThumbsUp, ThumbsDown, RotateCcw, FileCodeIcon, FileText } from "lucide-react"
 import { emitFakeRuntime } from "@/lib/runtime"
-import type { RuntimeEvent } from "@/types/events"
-import type { AttachmentPart, TurnSegment, ToolCallEntry } from "@/types/message"
+import type { RuntimeEvent, ArtifactCreatedEvent } from "@/types/events"
+import type { AttachmentPart, TurnSegment, ToolCallEntry, ArtifactPart } from "@/types/message"
 import {
   Attachment,
   AttachmentMedia,
@@ -62,11 +63,23 @@ function getFileExtension(name: string): string {
   return map[ext] ?? ext.toUpperCase()
 }
 
-function UserAttachments({ attachments }: { attachments: AttachmentPart[] }) {
+function UserAttachments({ attachments, onOpenArtifact }: { attachments: AttachmentPart[]; onOpenArtifact?: (name: string, content: string, type: "document" | "code", language?: string) => void }) {
   if (attachments.length === 0) return null
 
   const images = attachments.filter((a) => a.data)
   const files = attachments.filter((a) => !a.data)
+
+  const getFileLanguage = (name: string): string => {
+    const ext = name.split(".").pop()?.toLowerCase() || ""
+    const map: Record<string, string> = { tsx: "tsx", ts: "typescript", jsx: "jsx", js: "javascript", py: "python", md: "md", json: "json", css: "css", html: "html" }
+    return map[ext] || ext
+  }
+
+  const isCodeFile = (name: string): boolean => {
+    const ext = name.split(".").pop()?.toLowerCase() || ""
+    const codeExts = ["tsx", "ts", "jsx", "js", "py", "json", "css", "html", "rb", "go", "rs", "java", "c", "cpp", "h", "sh", "bash", "yaml", "yml", "toml", "xml", "sql", "vue", "svelte"]
+    return codeExts.includes(ext)
+  }
 
   return (
     <div className="flex flex-col gap-3 mb-2 items-end">
@@ -88,7 +101,11 @@ function UserAttachments({ attachments }: { attachments: AttachmentPart[] }) {
         </AttachmentGroup>
       )}
       {files.map((att) => (
-        <Attachment key={att.id} className="w-full">
+        <Attachment
+          key={att.id}
+          className={`w-full ${onOpenArtifact && att.content ? "cursor-pointer hover:bg-white/5" : ""}`}
+          onClick={onOpenArtifact && att.content ? () => onOpenArtifact(att.name, att.content!, isCodeFile(att.name) ? "code" : "document", getFileLanguage(att.name)) : undefined}
+        >
           <AttachmentMedia>
             <FileCodeIcon />
           </AttachmentMedia>
@@ -174,12 +191,13 @@ function accumulateSegments(events: RuntimeEvent[]): TurnSegment[] {
 }
 
 export function ChatView({ chatId }: ChatViewProps) {
-  const { getChat, addMessage } = useChats()
+  const { getChat, addMessage, isArtifactPanelOpen, openArtifact, openArtifactPanel, closeArtifactPanel } = useChats()
   const chat = getChat(chatId)
 
   const [events, setEvents] = useState<RuntimeEvent[]>([])
   const [currentText, setCurrentText] = useState("")
   const [errorText, setErrorText] = useState("")
+  const [toolArtifacts, setToolArtifacts] = useState<Map<string, ArtifactPart>>(new Map())
 
   const eventsRef = useRef<RuntimeEvent[]>([])
   const currentTextRef = useRef("")
@@ -261,6 +279,24 @@ export function ChatView({ chatId }: ChatViewProps) {
           setEvents([])
           eventsRef.current = []
         }
+
+        if (event.type === "artifact.created") {
+          const artifactEvent = event as ArtifactCreatedEvent
+          setToolArtifacts((prev) => {
+            const next = new Map(prev)
+            next.set(artifactEvent.artifactId, {
+              type: "artifact",
+              id: artifactEvent.artifactId,
+              name: artifactEvent.name,
+              content: artifactEvent.content,
+              artifactType: artifactEvent.artifactType,
+              language: artifactEvent.language,
+              createdAt: artifactEvent.timestamp,
+            })
+            return next
+          })
+          openArtifact(artifactEvent.artifactId)
+        }
       },
     }, userMessage ?? "")
 
@@ -299,12 +335,70 @@ export function ChatView({ chatId }: ChatViewProps) {
     eventsRef.current = []
   }, [chatId, addMessage, segments])
 
+  const handleOpenToolArtifact = useCallback((call: ToolCallEntry) => {
+    const artifactId = `tool-${call.toolCallId}`
+    const input = typeof call.input === "string" ? call.input : ""
+    const output = typeof call.output === "string" ? call.output : ""
+    const name = input.split("/").pop() || call.name
+
+    setToolArtifacts((prev) => {
+      const next = new Map(prev)
+      next.set(artifactId, {
+        type: "artifact",
+        id: artifactId,
+        name,
+        content: output || "(no output)",
+        artifactType: call.name === "shell" ? "code" : "code",
+        language: call.name === "shell" ? "bash" : name.split(".").pop(),
+        createdAt: Date.now(),
+      })
+      return next
+    })
+    openArtifact(artifactId)
+  }, [openArtifact])
+
+  const handleOpenAttachment = useCallback((name: string, content: string, type: "document" | "code", language?: string) => {
+    const artifactId = `att-${name}`
+    setToolArtifacts((prev) => {
+      const next = new Map(prev)
+      next.set(artifactId, {
+        type: "artifact",
+        id: artifactId,
+        name,
+        content,
+        artifactType: type,
+        language,
+        createdAt: Date.now(),
+      })
+      return next
+    })
+    openArtifact(artifactId)
+  }, [openArtifact])
+
+  const toggleArtifactPanel = useCallback(() => {
+    if (isArtifactPanelOpen) {
+      closeArtifactPanel()
+    } else {
+      openArtifactPanel()
+    }
+  }, [isArtifactPanelOpen, openArtifactPanel, closeArtifactPanel])
+
   const isError = phase === "error"
   const isGenerating = phase !== "idle"
 
   return (
-    <div className="flex flex-col h-full min-h-0">
-      <MessageScrollerProvider autoScroll scrollEdgeThreshold={80} scrollPreviousItemPeek={120}>
+    <div className="flex h-full min-h-0">
+      <div className={`flex flex-col flex-1 min-w-0 transition-all duration-300 ease-in-out ${isArtifactPanelOpen ? "" : ""}`}>
+        <div className="relative">
+          <button
+            onClick={toggleArtifactPanel}
+            className={`absolute top-2 right-2 z-10 p-1.5 rounded-lg transition-colors cursor-pointer ${isArtifactPanelOpen ? "bg-white/10 text-white/90" : "text-white/60 hover:text-white/80 hover:bg-white/5"}`}
+            title="Toggle Artifacts"
+          >
+            <FileText className="size-4" />
+          </button>
+        </div>
+        <MessageScrollerProvider autoScroll scrollEdgeThreshold={80} scrollPreviousItemPeek={120}>
         <MessageScroller>
           <MessageScrollerViewport preserveScrollOnPrepend className="pt-4 pb-0 scrollbar-hide">
             <MessageScrollerContent className="mx-auto max-w-3xl space-y-4 px-4 gap-4">
@@ -364,6 +458,7 @@ export function ChatView({ chatId }: ChatViewProps) {
                                       isAgentCompleted={true}
                                       toolEvents={toolEventsForTimeline}
                                       toolCalls={segment.calls}
+                                      onOpenArtifact={handleOpenToolArtifact}
                                     />
                                   )
                                 }
@@ -390,6 +485,7 @@ export function ChatView({ chatId }: ChatViewProps) {
                         <div className="flex flex-col items-end gap-1">
                           <UserAttachments
                             attachments={msg.parts.filter((p): p is AttachmentPart => p.type === "attachment")}
+                            onOpenArtifact={handleOpenAttachment}
                           />
                           <div className="rounded-2xl px-4 py-2 bg-primary text-primary-foreground">
                             <p className="whitespace-pre-wrap">
@@ -435,6 +531,7 @@ export function ChatView({ chatId }: ChatViewProps) {
                                 toolEvents={toolEventsForTimeline}
                                 toolCalls={segment.calls}
                                 startCollapsed={false}
+                                onOpenArtifact={handleOpenToolArtifact}
                               />
                             )
                           }
@@ -456,12 +553,20 @@ export function ChatView({ chatId }: ChatViewProps) {
           <MessageScrollerButton direction="end" />
         </MessageScroller>
       </MessageScrollerProvider>
-      <PromptInput
-        onSend={handleSend}
-        onCancel={handleCancel}
-        isInChat
-        isGenerating={isGenerating}
-      />
+        <PromptInput
+          onSend={handleSend}
+          onCancel={handleCancel}
+          isInChat
+          isGenerating={isGenerating}
+        />
+      </div>
+      <div
+        className={`shrink-0 overflow-hidden transition-[width] duration-300 ease-in-out ${isArtifactPanelOpen ? "w-[400px]" : "w-0"}`}
+      >
+        <div className="w-[400px] h-full">
+          <ArtifactPanel chatId={chatId} extraArtifacts={Array.from(toolArtifacts.values())} />
+        </div>
+      </div>
     </div>
   )
 }

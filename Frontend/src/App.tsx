@@ -27,7 +27,7 @@ export function App() {
   const [workspace, setWorkspace] = useState("my-workspace")
   const workspaceRef = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
-  const { chats } = useChats()
+  const { chats, isArtifactPanelOpen, openArtifactPanel, closeArtifactPanel } = useChats()
   const routerState = useRouterState()
   const isHome = routerState.location.pathname === "/"
 
@@ -81,7 +81,7 @@ export function App() {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>
-                  <SidebarMenuButton tooltip="Artifacts">
+                  <SidebarMenuButton tooltip="Artifacts" onClick={() => isArtifactPanelOpen ? closeArtifactPanel() : openArtifactPanel()}>
                     <Scroll className="size-4" />
                     <span>Artifacts</span>
                   </SidebarMenuButton>

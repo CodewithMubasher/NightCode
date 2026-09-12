@@ -39,6 +39,9 @@ export interface ArtifactPart {
   id: string
   name: string
   content: string
+  artifactType: "document" | "code"
+  language?: string
+  createdAt: number
 }
 
 export interface AttachmentPart {
