@@ -2,6 +2,7 @@ import { createRouter, createRoute, createRootRoute } from "@tanstack/react-rout
 import { ChatView } from "@/components/chat-view"
 import { Home } from "@/pages/home"
 import { Workspaces } from "@/pages/workspaces"
+import { WorkspaceView } from "@/pages/workspace-view"
 import { App } from "@/App"
 
 const rootRoute = createRootRoute({
@@ -29,7 +30,16 @@ const workspacesRoute = createRoute({
   component: Workspaces,
 })
 
-const routeTree = rootRoute.addChildren([indexRoute, chatRoute, workspacesRoute])
+const workspaceRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/workspaces/$workspaceId",
+  component: () => {
+    const { workspaceId } = workspaceRoute.useParams()
+    return <WorkspaceView workspaceId={workspaceId} />
+  },
+})
+
+const routeTree = rootRoute.addChildren([indexRoute, chatRoute, workspacesRoute, workspaceRoute])
 
 export const router = createRouter({
   routeTree,
