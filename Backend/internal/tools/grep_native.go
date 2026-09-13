@@ -13,7 +13,7 @@ import (
 	"github.com/bmatcuk/doublestar/v4"
 )
 
-func (t *GrepTool) execNativeImpl(ctx context.Context, in GrepInput, ws *Workspace) (ToolResult, error) {
+func (t *GrepTool) execNativeImpl(ctx context.Context, in GrepInput, searchRoot string, ws *Workspace) (ToolResult, error) {
 	re, err := regexp.Compile(in.Pattern)
 	if err != nil {
 		return ToolResult{}, &ToolError{Code: "invalid_input", Message: fmt.Sprintf("invalid regex: %v", err)}
@@ -22,12 +22,12 @@ func (t *GrepTool) execNativeImpl(ctx context.Context, in GrepInput, ws *Workspa
 	var matches []GrepMatch
 	truncated := false
 
-	err = filepath.WalkDir(ws.Root, func(path string, d os.DirEntry, err error) error {
+	err = filepath.WalkDir(searchRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
 		if d.IsDir() {
-			if strings.HasPrefix(d.Name(), ".") && path != ws.Root {
+			if strings.HasPrefix(d.Name(), ".") && path != searchRoot {
 				return filepath.SkipDir
 			}
 			return nil
@@ -38,7 +38,7 @@ func (t *GrepTool) execNativeImpl(ctx context.Context, in GrepInput, ws *Workspa
 
 		// Apply glob filter
 		if in.PathGlob != "" {
-			relPath, _ := filepath.Rel(ws.Root, path)
+			relPath, _ := filepath.Rel(searchRoot, path)
 			relPathSlash := filepath.ToSlash(relPath)
 			matched, _ := doublestar.Match(in.PathGlob, relPathSlash)
 			if !matched {
@@ -68,7 +68,7 @@ func (t *GrepTool) execNativeImpl(ctx context.Context, in GrepInput, ws *Workspa
 			lineNum++
 			line := scanner.Text()
 			if re.MatchString(line) {
-				relPath, _ := filepath.Rel(ws.Root, path)
+				relPath, _ := filepath.Rel(searchRoot, path)
 				matches = append(matches, GrepMatch{
 					File:       relPath,
 					LineNumber: lineNum,

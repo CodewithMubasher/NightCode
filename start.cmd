@@ -11,8 +11,9 @@ echo  ========================================
 echo.
 
 REM --- ds2api (DeepSeek Web API) ---
+REM First run: visible window to paste token. Subsequent runs: token is cached.
 echo [1/3] Starting ds2api on :5001 ...
-start "ds2api" /min cmd /c "cd /d C:\Users\Mubasher Developer\Desktop\ds2api && ds2api.exe"
+start "ds2api" cmd /c "cd /d C:\Users\Mubasher Developer\Desktop\ds2api && ds2api.exe"
 
 REM --- Backend (Go API server) ---
 echo [2/3] Starting backend on :3001 ...

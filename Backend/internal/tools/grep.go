@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -18,6 +19,8 @@ var rgLookPath = exec.LookPath
 type GrepInput struct {
 	Pattern  string `json:"pattern"`
 	PathGlob string `json:"path_glob,omitempty"`
+	Query    string `json:"query,omitempty"`
+	Path     string `json:"path,omitempty"`
 }
 
 type GrepMatch struct {
@@ -35,15 +38,17 @@ type GrepOutput struct {
 type GrepTool struct{}
 
 func (t *GrepTool) Name() string        { return "grep" }
-func (t *GrepTool) Description() string { return "Search file contents using a regex pattern. Uses ripgrep (rg) when available." }
+func (t *GrepTool) Description() string { return "Search file contents. Use query for simple text search, pattern for regex." }
 func (t *GrepTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
 		"properties": {
-			"pattern": {"type": "string", "description": "Regex pattern to search for"},
-			"path_glob": {"type": "string", "description": "Optional glob pattern to filter files (e.g. **/*.go)"}
+			"query": {"type": "string", "description": "Plain text to search for (simple, no regex)"},
+			"pattern": {"type": "string", "description": "Regex pattern to search for (advanced)"},
+			"path": {"type": "string", "description": "Directory to search in (defaults to workspace root)"},
+			"path_glob": {"type": "string", "description": "Glob pattern to filter files (e.g. **/*.go)"}
 		},
-		"required": ["pattern"]
+		"required": []
 	}`)
 }
 
@@ -53,20 +58,39 @@ func (t *GrepTool) Execute(ctx context.Context, input json.RawMessage, ws *Works
 		return ToolResult{}, &ToolError{Code: "invalid_input", Message: fmt.Sprintf("invalid JSON: %v", err)}
 	}
 
+	// query is a convenience alias for pattern (auto-escape regex)
+	if in.Query != "" && in.Pattern == "" {
+		in.Pattern = regexp.QuoteMeta(in.Query)
+	}
 	if in.Pattern == "" {
-		return ToolResult{}, &ToolError{Code: "invalid_input", Message: "pattern is required"}
+		return ToolResult{}, &ToolError{Code: "invalid_input", Message: "query or pattern is required"}
+	}
+
+	// If path is set, prepend it to path_glob
+	if in.Path != "" && in.PathGlob == "" {
+		in.PathGlob = in.Path + "/**"
+	}
+
+	// Determine search root
+	searchRoot := ws.Root
+	if in.Path != "" {
+		resolved, err := ws.ResolvePath(in.Path)
+		if err != nil {
+			return ToolResult{}, err
+		}
+		searchRoot = resolved
 	}
 
 	// Try rg (ripgrep) first — it's faster and handles binary/encoding automatically
 	if rgPath, err := rgLookPath("rg"); err == nil {
-		return t.execRg(ctx, rgPath, in, ws)
+		return t.execRg(ctx, rgPath, in, searchRoot, ws)
 	}
 
 	// Fallback: native Go regex walk
-	return t.execNative(ctx, in, ws)
+	return t.execNative(ctx, in, searchRoot, ws)
 }
 
-func (t *GrepTool) execRg(ctx context.Context, rgPath string, in GrepInput, ws *Workspace) (ToolResult, error) {
+func (t *GrepTool) execRg(ctx context.Context, rgPath string, in GrepInput, searchRoot string, ws *Workspace) (ToolResult, error) {
 	args := []string{
 		"--no-heading",
 		"--line-number",
@@ -80,7 +104,7 @@ func (t *GrepTool) execRg(ctx context.Context, rgPath string, in GrepInput, ws *
 		args = append(args, "--glob", in.PathGlob)
 	}
 
-	args = append(args, ws.Root)
+	args = append(args, searchRoot)
 
 	cmd := exec.CommandContext(ctx, rgPath, args...)
 	var stdout, stderr bytes.Buffer
@@ -139,8 +163,7 @@ func (t *GrepTool) execRg(ctx context.Context, rgPath string, in GrepInput, ws *
 	return ToolResult{Output: resultBytes}, nil
 }
 
-func (t *GrepTool) execNative(ctx context.Context, in GrepInput, ws *Workspace) (ToolResult, error) {
+func (t *GrepTool) execNative(ctx context.Context, in GrepInput, searchRoot string, ws *Workspace) (ToolResult, error) {
 	// Native fallback using filepath.WalkDir + regexp
-	// (import regexp, os, path/filepath, bufio, strings — already imported above via bytes/exec context)
-	return t.execNativeImpl(ctx, in, ws)
+	return t.execNativeImpl(ctx, in, searchRoot, ws)
 }

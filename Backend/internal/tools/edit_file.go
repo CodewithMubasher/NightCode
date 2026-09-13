@@ -70,10 +70,16 @@ func (t *EditFileTool) Execute(ctx context.Context, input json.RawMessage, ws *W
 	// Count occurrences
 	count := bytes.Count(data, []byte(in.OldString))
 	if count == 0 {
-		return ToolResult{}, &ToolError{Code: "edit_not_found", Message: "old_string not found in file"}
+		return ToolResult{}, &ToolError{
+			Code:    "edit_not_found",
+			Message: fmt.Sprintf("Edit failed: old_string not found in %s. The file content may have changed. Read the file again and retry with the current content.", in.Path),
+		}
 	}
 	if count > 1 {
-		return ToolResult{}, &ToolError{Code: "ambiguous_edit", Message: fmt.Sprintf("old_string found %d times in file; must be unique", count)}
+		return ToolResult{}, &ToolError{
+			Code:    "ambiguous_edit",
+			Message: fmt.Sprintf("Edit failed: old_string found %d times in %s. Make your old_string more unique by including more surrounding context (e.g. the full function signature or a larger block).", count, in.Path),
+		}
 	}
 
 	// Compute diff stats from actual before/after
