@@ -14,6 +14,24 @@ import (
 type Message struct {
 	Role    string // "system" | "user" | "assistant" | "tool"
 	Content string
+
+	// ToolCalls is set on assistant messages that requested tool calls.
+	// Each entry maps 1:1 to a provider.ToolCall.
+	ToolCalls []ToolCallInfo
+
+	// ToolCallID and ToolName are set on tool-role result messages,
+	// linking the result back to the specific tool call it responds to.
+	ToolCallID string
+	ToolName   string
+}
+
+// ToolCallInfo is a provider-neutral representation of a single tool
+// invocation requested by the model. Mirrors provider.ToolCall without
+// importing the provider package (avoids import cycles).
+type ToolCallInfo struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"` // raw JSON string
 }
 
 // BuildRequest is the input to Build.

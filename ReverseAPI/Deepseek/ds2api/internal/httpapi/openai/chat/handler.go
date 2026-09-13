@@ -22,13 +22,21 @@ const openAIGeneralMaxSize = shared.GeneralMaxSize
 var writeJSON = shared.WriteJSON
 
 type Handler struct {
-	Store       shared.ConfigReader
-	Auth        shared.AuthResolver
-	DS          shared.DeepSeekCaller
-	ChatHistory *chathistory.Store
+	Store        shared.ConfigReader
+	Auth         shared.AuthResolver
+	DS           shared.DeepSeekCaller
+	ChatHistory  *chathistory.Store
+	SessionStore SessionStore
 
 	leaseMu      sync.Mutex
 	streamLeases map[string]streamLease
+}
+
+// SessionStore maps NightCode chat IDs to DeepSeek session IDs.
+type SessionStore interface {
+	Get(chatID string) (string, bool)
+	Set(chatID, sessionID string)
+	Delete(chatID string)
 }
 
 type streamLease struct {

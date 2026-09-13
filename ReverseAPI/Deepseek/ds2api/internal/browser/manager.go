@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -13,20 +12,14 @@ import (
 	"ds2api/internal/config"
 )
 
-const tokenFileName = ".browser_token"
-
 type Manager struct {
 	mu         sync.Mutex
 	token      string
-	tokenFile  string
 	tokenReady chan struct{}
 }
 
 func NewManager() *Manager {
-	exe, _ := os.Executable()
-	tokenFile := filepath.Join(filepath.Dir(exe), tokenFileName)
 	return &Manager{
-		tokenFile:  tokenFile,
 		tokenReady: make(chan struct{}),
 	}
 }
@@ -43,36 +36,7 @@ func (m *Manager) setToken(token string) {
 	m.token = token
 }
 
-func (m *Manager) loadSavedToken() string {
-	data, err := os.ReadFile(m.tokenFile)
-	if err != nil {
-		return ""
-	}
-	token := strings.TrimSpace(string(data))
-	if token != "" {
-		config.Logger.Info("[browser] loaded saved token from disk")
-	}
-	return token
-}
-
-func (m *Manager) saveToken(token string) {
-	if token == "" {
-		return
-	}
-	if err := os.WriteFile(m.tokenFile, []byte(token), 0o600); err != nil {
-		config.Logger.Warn("[browser] failed to save token", "error", err)
-	} else {
-		config.Logger.Info("[browser] token saved to disk")
-	}
-}
-
 func (m *Manager) Start(_ context.Context, _ time.Duration) (string, error) {
-	if saved := m.loadSavedToken(); saved != "" {
-		m.setToken(saved)
-		close(m.tokenReady)
-		return saved, nil
-	}
-
 	fmt.Println()
 	fmt.Println("========================================")
 	fmt.Println("  DeepSeek Token Required")
@@ -96,7 +60,6 @@ func (m *Manager) Start(_ context.Context, _ time.Duration) (string, error) {
 	}
 
 	m.setToken(token)
-	m.saveToken(token)
 	close(m.tokenReady)
 
 	config.Logger.Info("[browser] token accepted")

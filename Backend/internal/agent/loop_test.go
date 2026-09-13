@@ -124,7 +124,8 @@ func okRegistry() tools.ToolRegistry {
 }
 
 // TestLoop_MaxIterationCap verifies the loop stops at 20 iterations with
-// max_iterations_exceeded when the model keeps requesting tools.
+// turn.completed when the model keeps requesting tools (the loop did real
+// work but can't continue further — this is not an error).
 func TestLoop_MaxIterationCap(t *testing.T) {
 	ws, _ := tools.NewWorkspace(t.TempDir())
 	call := provider.ToolCall{ID: "1", Name: "ok_tool", Arguments: "{}"}
@@ -143,17 +144,14 @@ func TestLoop_MaxIterationCap(t *testing.T) {
 	go loop.Run(context.Background(), ws, "c", "loop forever", nil, events)
 	evts := collect(events)
 
-	var termErr *types.RuntimeEvent
+	var termCompleted bool
 	for i := range evts {
-		if evts[i].Type == "turn.error" {
-			termErr = &evts[i]
+		if evts[i].Type == "turn.completed" {
+			termCompleted = true
 		}
 	}
-	if termErr == nil {
-		t.Fatal("expected a turn.error event")
-	}
-	if termErr.Code != "max_iterations_exceeded" {
-		t.Errorf("expected code max_iterations_exceeded, got %q", termErr.Code)
+	if !termCompleted {
+		t.Fatal("expected a turn.completed event")
 	}
 	if p.callCount != maxIterations {
 		t.Errorf("expected exactly %d model calls, got %d", maxIterations, p.callCount)

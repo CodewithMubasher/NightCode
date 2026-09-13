@@ -21,6 +21,11 @@ import (
 const (
 	maxIterations          = 20
 	maxConsecutiveFailures = 4
+
+	// maxToolOutputBytes is the maximum size of a tool result that will be
+	// sent to the model. Outputs exceeding this are truncated with structured
+	// metadata so the model still knows the output existed and how large it was.
+	maxToolOutputBytes = 8 * 1024 // 8 KB
 )
 
 // Loop drives the real agent turn: build context, iterate over model + tools,
@@ -52,8 +57,11 @@ func (l *Loop) Run(ctx context.Context, ws *tools.Workspace, chatID string, user
 	evtID := func() string { return fmt.Sprintf("evt-%d", time.Now().UnixNano()) }
 	messageID := uuid.New().String()
 
-	// Build context via Step 3
-	ctxb, buildErr := ctxbuilder.Build(ctx, ctxbuilder.BuildRequest{
+	// Build context via ContextManager (budget-driven)
+	cm := ctxbuilder.NewContextManager(ctxbuilder.ContextBudget{
+		TotalTokens: ctxbuilder.DefaultContextTokens,
+	})
+	ctxb, buildErr := cm.Build(ctx, ctxbuilder.BuildRequest{
 		Workspace: ws,
 		ChatID:    chatID,
 		History:   history,
@@ -63,6 +71,11 @@ func (l *Loop) Run(ctx context.Context, ws *tools.Workspace, chatID string, user
 	}
 	for _, w := range ctxb.Warnings {
 		log.Printf("context warning: %s", w)
+	}
+	if ctxb.Stats.MessagesCompacted > 0 {
+		log.Printf("context: compacted %d messages, kept %d, tokens=%d/%d",
+			ctxb.Stats.MessagesCompacted, ctxb.Stats.MessagesKept,
+			ctxb.Stats.HistoryTokens, ctxb.Stats.BudgetTokens)
 	}
 
 	// Emit turn.started
@@ -109,6 +122,7 @@ func (l *Loop) Run(ctx context.Context, ws *tools.Workspace, chatID string, user
 			SystemPrompt: ctxb.SystemPrompt,
 			Messages:     messages,
 			Tools:        toolSpecs,
+			ChatID:       chatID,
 		}
 
 		eventCh, err := l.provider.StreamChat(ctx, req)
@@ -307,6 +321,14 @@ func (l *Loop) executeTools(
 					Duration:   duration,
 				}
 			} else {
+				// Truncate large outputs to protect the context budget.
+				outputBytes := result.Output
+				originalBytes := len(outputBytes)
+				if originalBytes > maxToolOutputBytes {
+					outputBytes = append(outputBytes[:maxToolOutputBytes], []byte("\n\n...truncated...")...)
+				}
+				result.Output = outputBytes
+
 				entry.Status = "completed"
 				entry.Output = result.Output
 				mu.Lock()
@@ -407,10 +429,29 @@ func turnError(evtID func() string, segID string, now func() int64, err error, c
 func buildMessages(history []ctxbuilder.Message, userMessage string) []provider.Message {
 	msgs := make([]provider.Message, 0, len(history)+1)
 	for _, m := range history {
-		if m.Role != "user" && m.Role != "assistant" && m.Role != "tool" {
+		switch m.Role {
+		case "user":
+			msgs = append(msgs, provider.Message{Role: "user", Content: m.Content})
+		case "assistant":
+			pm := provider.Message{Role: "assistant", Content: m.Content}
+			for _, tc := range m.ToolCalls {
+				pm.ToolCalls = append(pm.ToolCalls, provider.ToolCall{
+					ID:        tc.ID,
+					Name:      tc.Name,
+					Arguments: tc.Arguments,
+				})
+			}
+			msgs = append(msgs, pm)
+		case "tool":
+			msgs = append(msgs, provider.Message{
+				Role:       "tool",
+				Content:    m.Content,
+				ToolCallID: m.ToolCallID,
+				ToolName:   m.ToolName,
+			})
+		default:
 			continue
 		}
-		msgs = append(msgs, provider.Message{Role: m.Role, Content: m.Content})
 	}
 	msgs = append(msgs, provider.Message{Role: "user", Content: userMessage})
 	return msgs

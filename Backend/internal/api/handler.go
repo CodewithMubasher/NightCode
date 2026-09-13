@@ -202,6 +202,9 @@ func (h *Handler) HandleSendMessage(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(r.Context())
 
 	h.activeRunsMu.Lock()
+	if oldCancel, ok := h.activeRuns[chatID]; ok {
+		oldCancel() // cancel any in-flight run for this chat
+	}
 	h.activeRuns[chatID] = cancel
 	h.activeRunsMu.Unlock()
 
@@ -308,14 +311,17 @@ func (h *Handler) runRealLoop(ctx context.Context, p provider.Provider, workspac
 		if err != nil {
 			log.Printf("load history error: %v", err)
 		} else {
-			history = make([]ctxbuilder.Message, 0, len(rows))
+			history = make([]ctxbuilder.Message, 0, len(rows)*2)
 			for _, row := range rows {
-				if row.Role == "user" || row.Role == "assistant" {
+				if row.Role == "user" {
 					content := extractTextFromSegments(row.Segments)
 					if content == "" {
 						continue
 					}
-					history = append(history, ctxbuilder.Message{Role: row.Role, Content: content})
+					history = append(history, ctxbuilder.Message{Role: "user", Content: content})
+				} else if row.Role == "assistant" {
+					msgs := expandAssistantSegments(row.Segments)
+					history = append(history, msgs...)
 				}
 			}
 		}
@@ -363,6 +369,84 @@ func extractTextFromSegments(segments json.RawMessage) string {
 		}
 	}
 	return out
+}
+
+// expandAssistantSegments converts stored assistant message segments into
+// the full sequence of provider messages: alternating assistant (with
+// tool_calls) and tool (with results) messages. This preserves tool
+// call/result pairs across turns so the model retains context about
+// what tools were invoked and what they returned.
+//
+// Segment format (from types.Segment):
+//
+//	{"type": "text", "text": "..."}
+//	{"type": "tool-group", "calls": [{"toolCallId": "...", "name": "...", "status": "...", "input": ..., "output": ...}]}
+func expandAssistantSegments(segments json.RawMessage) []ctxbuilder.Message {
+	if len(segments) == 0 {
+		return nil
+	}
+
+	var segs []types.Segment
+	if err := json.Unmarshal(segments, &segs); err != nil {
+		return nil
+	}
+
+	var msgs []ctxbuilder.Message
+
+	for _, seg := range segs {
+		switch seg.Type {
+		case "text":
+			if seg.Text != "" {
+				msgs = append(msgs, ctxbuilder.Message{
+					Role:    "assistant",
+					Content: seg.Text,
+				})
+			}
+
+		case "tool-group":
+			if len(seg.Calls) == 0 {
+				continue
+			}
+
+			// Build the assistant message with tool_calls.
+			assistantMsg := ctxbuilder.Message{
+				Role:      "assistant",
+				Content:   "", // assistant messages with tool calls have empty content
+				ToolCalls: make([]ctxbuilder.ToolCallInfo, 0, len(seg.Calls)),
+			}
+			for _, call := range seg.Calls {
+				// Marshal input back to JSON string for provider.ToolCall.Arguments.
+				argsBytes, _ := json.Marshal(call.Input)
+				assistantMsg.ToolCalls = append(assistantMsg.ToolCalls, ctxbuilder.ToolCallInfo{
+					ID:        call.ToolCallID,
+					Name:      call.Name,
+					Arguments: string(argsBytes),
+				})
+			}
+			msgs = append(msgs, assistantMsg)
+
+			// Build tool result messages for each call.
+			for _, call := range seg.Calls {
+				content := ""
+				if call.Status == "failed" {
+					content = call.Error
+					if content == "" {
+						content = "tool failed with no error message"
+					}
+				} else if len(call.Output) > 0 {
+					content = string(call.Output)
+				}
+				msgs = append(msgs, ctxbuilder.Message{
+					Role:       "tool",
+					Content:    content,
+					ToolCallID: call.ToolCallID,
+					ToolName:   call.Name,
+				})
+			}
+		}
+	}
+
+	return msgs
 }
 
 // resolveWorkspacePath maps a workspaceID to a directory under workspacesRoot.

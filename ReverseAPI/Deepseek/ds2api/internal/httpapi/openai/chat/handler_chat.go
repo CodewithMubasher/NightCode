@@ -47,9 +47,23 @@ func (h *Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, status, detail)
 		return
 	}
+
+	// Extract NightCode chat ID for session persistence.
+	chatID := strings.TrimSpace(r.Header.Get("X-NightCode-Chat-ID"))
+	var existingSessionID string
+	if chatID != "" && h.SessionStore != nil {
+		if sid, ok := h.SessionStore.Get(chatID); ok {
+			existingSessionID = sid
+			config.Logger.Info("[session] reusing deepseek session", "chat_id", chatID, "session_id", sid)
+		}
+	}
+
 	var sessionID string
 	defer func() {
-		h.autoDeleteRemoteSession(r.Context(), a, sessionID)
+		// Only auto-delete if this is a new session (not a reused one).
+		if existingSessionID == "" {
+			h.autoDeleteRemoteSession(r.Context(), a, sessionID)
+		}
 		h.Auth.Release(a)
 	}()
 
@@ -74,11 +88,20 @@ func (h *Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	stdReq, err = h.applyCurrentInputFile(r.Context(), a, stdReq)
-	if err != nil {
-		status, message := mapCurrentInputFileError(err)
-		writeOpenAIError(w, status, message)
-		return
+
+	// Skip DS2API_HISTORY.txt when reusing an existing session — the session
+	// already has the full conversation context.
+	if existingSessionID == "" {
+		stdReq, err = h.applyCurrentInputFile(r.Context(), a, stdReq)
+		if err != nil {
+			status, message := mapCurrentInputFileError(err)
+			writeOpenAIError(w, status, message)
+			return
+		}
+	} else {
+		// For reused sessions, send messages directly without file upload.
+		// The session already has context; just send the latest user message.
+		stdReq.CurrentInputFileApplied = true // skip file upload
 	}
 	historySession := startChatHistory(h.ChatHistory, r, a, stdReq)
 
@@ -86,8 +109,13 @@ func (h *Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 		result, outErr := completionruntime.ExecuteNonStreamWithRetry(r.Context(), h.DS, a, stdReq, completionruntime.Options{
 			RetryEnabled:     true,
 			CurrentInputFile: h.Store,
+			ExistingSession:  existingSessionID,
 		})
 		sessionID = result.SessionID
+		// Store the session mapping for future reuse.
+		if chatID != "" && h.SessionStore != nil && sessionID != "" {
+			h.SessionStore.Set(chatID, sessionID)
+		}
 		if outErr != nil {
 			if historySession != nil {
 				historySession.error(outErr.Status, outErr.Message, outErr.Code, historyThinkingForArchive(result.Turn.RawThinking, result.Turn.DetectionThinking, result.Turn.Thinking), historyTextForArchive(result.Turn.RawText, result.Turn.Text))
@@ -107,8 +135,13 @@ func (h *Handler) ChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	start, outErr := completionruntime.StartCompletion(r.Context(), h.DS, a, stdReq, completionruntime.Options{
 		CurrentInputFile: h.Store,
+		ExistingSession:  existingSessionID,
 	})
 	sessionID = start.SessionID
+	// Store the session mapping for future reuse.
+	if chatID != "" && h.SessionStore != nil && sessionID != "" {
+		h.SessionStore.Set(chatID, sessionID)
+	}
 	if outErr != nil {
 		if historySession != nil {
 			historySession.error(outErr.Status, outErr.Message, outErr.Code, "", "")

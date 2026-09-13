@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"strings"
 	"time"
 
@@ -18,6 +19,31 @@ const (
 	web2apiDefaultModel   = "DeepSeekV4.1"
 	web2apiDefaultBaseURL = "http://127.0.0.1:8080/v1"
 )
+
+// chatIDKey is the context key for passing the NightCode chat ID to the
+// HTTP transport, which adds it as X-NightCode-Chat-ID header.
+type chatIDKey struct{}
+
+// ChatIDFromContext extracts the chat ID from context.
+func ChatIDFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(chatIDKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
+// chatIDTransport is a custom RoundTripper that injects the X-NightCode-Chat-ID
+// header from the context into every HTTP request.
+type chatIDTransport struct {
+	base http.RoundTripper
+}
+
+func (t *chatIDTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if chatID := ChatIDFromContext(req.Context()); chatID != "" {
+		req.Header.Set("X-NightCode-Chat-ID", chatID)
+	}
+	return t.base.RoundTrip(req)
+}
 
 // Web2APIProvider implements Provider using Eino's OpenAI-compatible ChatModel
 // adapter pointed at a local Web2API server (e.g. deepseek-tui). The Web2API
@@ -37,10 +63,16 @@ func NewWeb2APIProvider(ctx context.Context, apiKey, model, baseURL string) (*We
 		baseURL = web2apiDefaultBaseURL
 	}
 
+	// Use a custom transport that injects X-NightCode-Chat-ID header per request.
+	httpClient := &http.Client{
+		Transport: &chatIDTransport{base: http.DefaultTransport},
+	}
+
 	cm, err := einoopenai.NewChatModel(ctx, &einoopenai.ChatModelConfig{
-		APIKey:  apiKey,
-		Model:   model,
-		BaseURL: baseURL,
+		APIKey:     apiKey,
+		Model:      model,
+		BaseURL:    baseURL,
+		HTTPClient: httpClient,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("web2api chat model: %w", err)
@@ -99,6 +131,11 @@ func (p *Web2APIProvider) streamWithRetry(ctx context.Context, req ChatRequest, 
 func (p *Web2APIProvider) streamOnce(ctx context.Context, req ChatRequest, events chan<- ChatEvent) *ProviderError {
 	messages := convertWeb2APIMessages(req)
 	toolInfos := convertWeb2APIToolSpecs(req.Tools)
+
+	// Inject chat ID into context so the custom transport adds the header.
+	if req.ChatID != "" {
+		ctx = context.WithValue(ctx, chatIDKey{}, req.ChatID)
+	}
 
 	var (
 		sr  *schema.StreamReader[*schema.Message]

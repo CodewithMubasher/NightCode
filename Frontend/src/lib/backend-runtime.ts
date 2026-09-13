@@ -117,6 +117,11 @@ export function emitBackendRuntime(
             try {
               const event = JSON.parse(jsonStr) as RuntimeEvent
               callbacks.onEvent(event)
+              // After tool.started, yield so React renders the "running"
+              // state before tool.completed arrives in the same chunk.
+              if (event.type === "tool.started") {
+                await new Promise<void>((r) => setTimeout(r, 0))
+              }
             } catch (e) {
               console.warn("Failed to parse SSE event:", jsonStr, e)
             }

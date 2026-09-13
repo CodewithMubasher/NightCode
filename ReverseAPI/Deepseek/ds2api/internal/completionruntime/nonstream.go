@@ -30,6 +30,7 @@ type Options struct {
 	RetryEnabled          bool
 	RetryMaxAttempts      int
 	CurrentInputFile      history.CurrentInputConfigReader
+	ExistingSession       string // reuse this DeepSeek session ID instead of creating a new one
 }
 
 type NonStreamResult struct {
@@ -57,10 +58,17 @@ func StartCompletion(ctx context.Context, ds DeepSeekCaller, a *auth.RequestAuth
 	if prepErr != nil {
 		return StartResult{Request: stdReq}, prepErr
 	}
-	sessionID, err := ds.CreateSession(ctx, a, maxAttempts)
-	if err != nil {
-		return StartResult{Request: stdReq}, authOutputError(a)
+
+	// Reuse existing session if provided, otherwise create a new one.
+	sessionID := opts.ExistingSession
+	if sessionID == "" {
+		var err error
+		sessionID, err = ds.CreateSession(ctx, a, maxAttempts)
+		if err != nil {
+			return StartResult{Request: stdReq}, authOutputError(a)
+		}
 	}
+
 	pow, err := ds.GetPow(ctx, a, maxAttempts)
 	if err != nil {
 		return StartResult{SessionID: sessionID, Request: stdReq}, &assistantturn.OutputError{Status: http.StatusUnauthorized, Message: "Failed to get PoW (invalid token or unknown error).", Code: "error"}
