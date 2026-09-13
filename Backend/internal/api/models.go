@@ -8,7 +8,7 @@ import (
 
 // modelInfo describes one selectable model for the frontend's model picker.
 type modelInfo struct {
-	Provider string `json:"provider"` // "gemini" | "groq" | "opencode-zen" | "openrouter"
+	Provider string `json:"provider"` // "gemini" | "groq" | "opencode-zen" | "openrouter" | "web2api"
 	ID       string `json:"id"`       // model identifier sent back on send
 	Label    string `json:"label"`    // display name
 	Default  bool   `json:"default"`  // true for the server's startup default
@@ -66,6 +66,14 @@ var openrouterModels = []string{
 	"thinkingmachines/inkling:free",
 }
 
+var web2apiModels = []string{
+	"DeepSeekV4.1",
+	"mock-deepseek-v1",
+	"deepseek-v4-flash",
+	"deepseek-v4-pro",
+	"deepseek-v4-flash-search",
+}
+
 // GET /api/models
 // Returns only models for providers that actually have an API key configured
 // in the environment, so the frontend never offers a model the backend can't
@@ -117,6 +125,17 @@ func (h *Handler) HandleListModels(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if os.Getenv("WEB2API_BASE_URL") != "" || os.Getenv("NIGHTCODE_PROVIDER") == "web2api" {
+		for _, id := range web2apiModels {
+			out = append(out, modelInfo{
+				Provider: "web2api",
+				ID:       id,
+				Label:    labelForModel(id),
+				Default:  h.providerName == "web2api" && h.modelName == id,
+			})
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	if out == nil {
 		out = []modelInfo{}
@@ -152,6 +171,11 @@ func labelForModel(id string) string {
 		"poolside/laguna-s-2.1:free":             "Laguna S 2.1",
 		"cohere/north-mini-code:free":            "North Mini Code",
 		"thinkingmachines/inkling:free":          "Inkling",
+		"DeepSeekV4.1":                          "DeepSeek V4.1 (Web)",
+		"mock-deepseek-v1":                      "Mock DeepSeek (Test)",
+		"deepseek-v4-flash":                     "DeepSeek V4 Flash (ds2api)",
+		"deepseek-v4-pro":                       "DeepSeek V4 Pro (ds2api)",
+		"deepseek-v4-flash-search":              "DeepSeek V4 Flash Search (ds2api)",
 	}
 	if l, ok := labels[id]; ok {
 		return l

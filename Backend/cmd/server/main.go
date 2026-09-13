@@ -119,6 +119,17 @@ func main() {
 			h.SetDefaultProviderInfo("openrouter", openrouterModelOr(model))
 			log.Printf("using openrouter provider (model=%s, keys=%d)", openrouterModelOr(model), len(keys))
 		}
+	case "web2api":
+		apiKey := os.Getenv("WEB2API_API_KEY")
+		model := os.Getenv("WEB2API_MODEL")
+		baseURL := os.Getenv("WEB2API_BASE_URL")
+		p, err := provider.NewWeb2APIProvider(context.Background(), apiKey, model, baseURL)
+		if err != nil {
+			log.Fatalf("failed to create web2api provider: %v", err)
+		}
+		h.SetProvider(p)
+		h.SetDefaultProviderInfo("web2api", web2apiModelOr(model))
+		log.Printf("using web2api provider (model=%s, baseURL=%s)", web2apiModelOr(model), web2apiBaseURLOr(baseURL))
 	default:
 		log.Println("using echo agent (NIGHTCODE_PROVIDER=echo)")
 	}
@@ -276,6 +287,20 @@ func openrouterModelOr(model string) string {
 		return "google/gemma-4-31b-it:free"
 	}
 	return model
+}
+
+func web2apiModelOr(model string) string {
+	if model == "" {
+		return "DeepSeekV4.1"
+	}
+	return model
+}
+
+func web2apiBaseURLOr(baseURL string) string {
+	if baseURL == "" {
+		return "http://127.0.0.1:8080/v1"
+	}
+	return baseURL
 }
 
 func corsMiddleware(next http.Handler, allowedOrigin string) http.Handler {
