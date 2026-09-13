@@ -49,3 +49,12 @@ coverage/
 # Frontend specific
 dist-ssr
 *.local
+
+# Backend runtime data
+*.db
+*.db-shm
+*.db-wal
+Backend/workspaces/
+Backend/testdata/
+Backend/cancel_out*.txt
+Backend/req_body.json

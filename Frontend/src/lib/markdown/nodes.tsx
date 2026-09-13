@@ -18,12 +18,12 @@ function NodeRenderer({ node }: { node: Content | Root }): React.ReactNode {
     case "heading": {
       const depth = node.depth
       const sizes: Record<number, string> = {
-        1: "text-xl font-bold mt-6 mb-2",
-        2: "text-lg font-bold mt-5 mb-2",
-        3: "text-base font-semibold mt-4 mb-1.5",
-        4: "text-sm font-semibold mt-3 mb-1",
-        5: "text-sm font-medium mt-2 mb-1",
-        6: "text-xs font-medium mt-2 mb-1",
+        1: "text-xl font-semibold mt-6 mb-2",
+        2: "text-lg font-medium mt-5 mb-2",
+        3: "text-base font-medium mt-4 mb-1.5",
+        4: "text-sm font-normal mt-3 mb-1",
+        5: "text-sm font-normal mt-2 mb-1",
+        6: "text-xs font-normal mt-2 mb-1",
       }
       return (
         <h1 className={`text-white ${sizes[depth] || sizes[1]}`}>

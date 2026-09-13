@@ -1,4 +1,4 @@
-import { useMemo, useCallback, useState, useRef } from "react"
+import { useMemo, useCallback, useState, useRef, useEffect } from "react"
 import { useNavigate } from "@tanstack/react-router"
 import { useChats } from "@/context/chat-context"
 import { PromptInput } from "@/components/prompt-input"
@@ -20,12 +20,13 @@ import {
 } from "@/components/ui/attachment"
 import { Search, Plus, X, GitBranch } from "lucide-react"
 import type { AttachmentPart } from "@/types/message"
+import { fetchWorkspaces, fetchArtifacts } from "@/lib/backend-runtime"
 
 interface Workspace {
   id: string
   name: string
   description: string
-  createdAt: number
+  created_at: string
 }
 
 interface ContextFile {
@@ -58,16 +59,6 @@ function saveGitData(workspaceId: string, data: GitData) {
   } catch {}
 }
 
-function loadWorkspaces(): Workspace[] {
-  try {
-    const raw = localStorage.getItem("nightcode-workspaces")
-    if (!raw) return []
-    return JSON.parse(raw) as Workspace[]
-  } catch {
-    return []
-  }
-}
-
 function loadContextFiles(workspaceId: string): ContextFile[] {
   try {
     const raw = localStorage.getItem(`nightcode-context-${workspaceId}`)
@@ -98,7 +89,16 @@ function isAcceptedFile(file: File): boolean {
 export function WorkspaceView({ workspaceId }: { workspaceId: string }) {
   const navigate = useNavigate()
   const { chats, createChat, addMessage } = useChats()
-  const workspaces = useMemo(() => loadWorkspaces(), [])
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([])
+  const [loadingWorkspaces, setLoadingWorkspaces] = useState(true)
+
+  useEffect(() => {
+    fetchWorkspaces().then((ws) => {
+      setWorkspaces(ws)
+      setLoadingWorkspaces(false)
+    })
+  }, [])
+
   const workspace = useMemo(() => workspaces.find((w) => w.id === workspaceId), [workspaces, workspaceId])
 
   const [contextFiles, setContextFiles] = useState<ContextFile[]>(() => loadContextFiles(workspaceId))
@@ -142,8 +142,16 @@ export function WorkspaceView({ workspaceId }: { workspaceId: string }) {
     e.target.value = ""
   }, [workspaceId])
 
-  const formatDate = (ts: number) => {
+  const formatDate = (ts: string) => {
     return new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+  }
+
+  if (loadingWorkspaces) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="size-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    )
   }
 
   return (
@@ -194,7 +202,7 @@ export function WorkspaceView({ workspaceId }: { workspaceId: string }) {
                         {chat.title}
                       </AttachmentTitle>
                       <AttachmentDescription className="shrink-0 ml-3">
-                        {formatDate(chat.createdAt)}
+                        {formatDate(String(chat.createdAt))}
                       </AttachmentDescription>
                     </AttachmentContent>
                   </Attachment>

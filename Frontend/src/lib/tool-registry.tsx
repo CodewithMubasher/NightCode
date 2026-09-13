@@ -1,5 +1,5 @@
 import type { ToolCallEntry } from "@/types/message"
-import { FileText, FilePen, Terminal, Search, Globe, Wrench, type LucideIcon } from "lucide-react"
+import { FileText, FilePen, FilePlus2, Terminal, Search, Globe, Wrench, Folder, GitBranch, GitCommitHorizontal, type LucideIcon } from "lucide-react"
 
 const hideScrollbarStyle = `
   .hide-scrollbar::-webkit-scrollbar { display: none; }
@@ -40,6 +40,20 @@ const toolRenderers: Record<string, ToolRenderer> = {
     label: "Edit file",
     getFileName: (entry) => extractFileName(entry.input),
   },
+  write_file: {
+    icon: FilePlus2,
+    label: "Create file",
+    getLabel: (entry) => {
+      if (entry.status === "running") return "Creating file"
+      // Backend reports newFile:false when the file already existed and was
+      // overwritten rather than newly created — reflect that distinction.
+      if (entry.output && typeof entry.output === "object" && "newFile" in entry.output) {
+        return (entry.output as { newFile: boolean }).newFile ? "Created file" : "Updated file"
+      }
+      return "Created file"
+    },
+    getFileName: (entry) => extractFileName(entry.input),
+  },
   shell: {
     icon: Terminal,
     label: "Run command",
@@ -50,8 +64,18 @@ const toolRenderers: Record<string, ToolRenderer> = {
         : entry.input && typeof entry.input === "object" && "command" in entry.input
           ? String((entry.input as { command: string }).command)
           : undefined
-      const output = entry.output
       if (!cmd) return null
+
+      // Backend returns a structured { stdout, stderr, exitCode, timedOut }
+      // object, not a bare string — pull the parts out for display.
+      const outputObj = entry.output && typeof entry.output === "object"
+        ? (entry.output as { stdout?: string; stderr?: string; exitCode?: number; timedOut?: boolean })
+        : undefined
+      const stdout = outputObj?.stdout ?? ""
+      const stderr = outputObj?.stderr ?? ""
+      const exitCode = outputObj?.exitCode
+      const timedOut = outputObj?.timedOut
+
       return (
         <div className="mt-2 text-xs space-y-2">
           <div>
@@ -60,11 +84,22 @@ const toolRenderers: Record<string, ToolRenderer> = {
               {cmd}
             </pre>
           </div>
-          {typeof output === "string" && output && (
+          {timedOut && (
+            <div className="text-red-400/80 font-mono text-[10px]">Command timed out</div>
+          )}
+          {stdout && (
             <div>
               <div className="text-white/40 mb-1 font-mono text-[10px]">Output</div>
               <pre className="rounded-lg bg-white/5 border border-white/10 p-3 whitespace-pre-wrap break-all hide-scrollbar text-white/60 font-mono text-[11px] leading-4 max-h-48 overflow-y-auto">
-                {output}
+                {stdout}
+              </pre>
+            </div>
+          )}
+          {stderr && (
+            <div>
+              <div className="text-white/40 mb-1 font-mono text-[10px]">Stderr{typeof exitCode === "number" && exitCode !== 0 ? ` (exit ${exitCode})` : ""}</div>
+              <pre className="rounded-lg bg-red-500/5 border border-red-500/10 p-3 whitespace-pre-wrap break-all hide-scrollbar text-red-300/70 font-mono text-[11px] leading-4 max-h-48 overflow-y-auto">
+                {stderr}
               </pre>
             </div>
           )}
@@ -93,6 +128,94 @@ const toolRenderers: Record<string, ToolRenderer> = {
       }
       return undefined
     },
+  },
+  list_dir: {
+    icon: Folder,
+    label: "List directory",
+    getLabel: (entry) => entry.status === "running" ? "Listing directory" : "Listed directory",
+    getFileName: (entry) => extractFileName(entry.input) || ".",
+    renderDetail: (entry) => {
+      const path = typeof entry.input === "string"
+        ? entry.input
+        : entry.input && typeof entry.input === "object" && "path" in entry.input
+          ? String((entry.input as { path: string }).path) || "."
+          : "."
+      const output = entry.output && typeof entry.output === "object"
+        ? (entry.output as { entries?: { name: string; isDir: boolean; size: number }[] })
+        : undefined
+      const entries = output?.entries
+      return (
+        <div className="mt-2 text-xs space-y-2">
+          <div>
+            <div className="text-white/40 mb-1 font-mono text-[10px]">path</div>
+            <pre className="rounded-lg bg-white/5 border border-white/10 p-3 whitespace-pre-wrap break-all hide-scrollbar text-white/70 font-mono text-[11px] leading-4">
+              {path}
+            </pre>
+          </div>
+          {entries && (
+            <div>
+              <div className="text-white/40 mb-1 font-mono text-[10px]">Output</div>
+              {entries.length === 0 ? (
+                <pre className="rounded-lg bg-white/5 border border-white/10 p-3 text-white/40 font-mono text-[11px] leading-4">
+                  (empty directory)
+                </pre>
+              ) : (
+                <pre className="rounded-lg bg-white/5 border border-white/10 p-3 whitespace-pre-wrap break-all hide-scrollbar text-white/60 font-mono text-[11px] leading-4 max-h-48 overflow-y-auto">
+                  {entries.map((e) => `${e.isDir ? "d " : "- "}${e.name}${e.isDir ? "/" : `  (${e.size}b)`}`).join("\n")}
+                </pre>
+              )}
+            </div>
+          )}
+        </div>
+      )
+    },
+  },
+  grep: {
+    icon: Search,
+    label: "Search",
+    getLabel: (entry) => entry.status === "running" ? "Searching" : "Searched",
+    getFileName: (entry) => {
+      if (entry.input && typeof entry.input === "object" && "pattern" in entry.input) {
+        return String((entry.input as { pattern: string }).pattern)
+      }
+      return undefined
+    },
+    renderDetail: (entry) => {
+      const output = entry.output && typeof entry.output === "object"
+        ? (entry.output as { matches?: { file: string; line_number: number; line_content: string }[] })
+        : undefined
+      const matches = output?.matches
+      if (!matches || matches.length === 0) return null
+      return (
+        <div className="mt-2 text-xs">
+          <pre className="rounded-lg bg-white/5 border border-white/10 p-3 overflow-x-auto hide-scrollbar text-white/70 font-mono text-[11px] leading-4 max-h-48 overflow-y-auto">
+            {matches.map((m) => `${m.file}:${m.line_number}: ${m.line_content}`).join("\n")}
+          </pre>
+        </div>
+      )
+    },
+  },
+  glob: {
+    icon: Search,
+    label: "Find files",
+    getLabel: (entry) => entry.status === "running" ? "Finding files" : "Found files",
+    getFileName: (entry) => {
+      if (entry.input && typeof entry.input === "object" && "pattern" in entry.input) {
+        return String((entry.input as { pattern: string }).pattern)
+      }
+      return undefined
+    },
+  },
+  git_status: {
+    icon: GitBranch,
+    label: "Git status",
+    getLabel: (entry) => entry.status === "running" ? "Checking git status" : "Checked git status",
+  },
+  git_diff: {
+    icon: GitCommitHorizontal,
+    label: "Git diff",
+    getLabel: (entry) => entry.status === "running" ? "Reading git diff" : "Read git diff",
+    getFileName: (entry) => extractFileName(entry.input),
   },
 }
 
@@ -130,6 +253,37 @@ export function getToolRenderer(toolName: string): ToolRenderer {
   return toolRenderers[toolName] ?? fallbackRenderer
 }
 
+// summaryPhraseForGroup returns the short phrase for a single tool name given
+// how many times it was called in this group, e.g. "Ran 3 commands",
+// "Created 1 file", "List directory". Falls back to the tool's registered
+// label (pluralized with a count) for tools without bespoke phrasing.
+function summaryPhraseForGroup(name: string, count: number): string {
+  switch (name) {
+    case "write_file":
+      return `Created ${count} file${count > 1 ? "s" : ""}`
+    case "edit_file":
+      return `Edit ${count} file${count > 1 ? "s" : ""}`
+    case "read_file":
+      return `Read ${count} file${count > 1 ? "s" : ""}`
+    case "shell":
+      return count === 1 ? "Ran command" : `Ran ${count} commands`
+    case "list_dir":
+      return count === 1 ? "List directory" : `List directory (${count})`
+    case "grep":
+      return count === 1 ? "Search" : `Search (${count})`
+    case "glob":
+      return count === 1 ? "Find files" : `Find files (${count})`
+    case "git_status":
+      return "Git status"
+    case "git_diff":
+      return count === 1 ? "Git diff" : `Git diff (${count})`
+    default: {
+      const label = getToolRenderer(name).label
+      return count > 1 ? `${label} (${count})` : label
+    }
+  }
+}
+
 export function computeToolSummary(calls: ToolCallEntry[]): string {
   const failedCount = calls.filter((c) => c.status === "failed").length
   const successCount = calls.length - failedCount
@@ -139,10 +293,26 @@ export function computeToolSummary(calls: ToolCallEntry[]): string {
   if (allFailed) return `Failed (${failedCount})`
   if (hasMixed) return `${successCount} done, ${failedCount} failed`
 
-  const editCount = calls.filter((c) => c.name === "edit_file").length
-  const readCount = calls.filter((c) => c.name === "read_file").length
+  // Count calls per tool name, preserving first-occurrence order so the
+  // heading reads in the same order the tools actually ran (e.g. "Ran 2
+  // commands, List directory" rather than an arbitrary/alphabetical order).
+  const order: string[] = []
+  const counts = new Map<string, number>()
+  for (const c of calls) {
+    if (!counts.has(c.name)) order.push(c.name)
+    counts.set(c.name, (counts.get(c.name) ?? 0) + 1)
+  }
 
-  if (editCount > 0) return `Edit ${editCount} file${editCount > 1 ? "s" : ""}`
-  if (readCount > 0) return `Read ${readCount} file${readCount > 1 ? "s" : ""}`
-  return calls.length === 1 ? `${getToolRenderer(calls[0].name).label}` : `${calls.length} tools`
+  const phrases = order.map((name) => summaryPhraseForGroup(name, counts.get(name)!))
+
+  // Cap at 3 distinct phrases so a long mixed batch doesn't produce an
+  // unreadable heading — collapse the rest into "+N more".
+  const maxPhrases = 3
+  if (phrases.length > maxPhrases) {
+    const shown = phrases.slice(0, maxPhrases)
+    const remaining = phrases.length - maxPhrases
+    return `${shown.join(", ")} +${remaining} more`
+  }
+
+  return phrases.join(", ")
 }

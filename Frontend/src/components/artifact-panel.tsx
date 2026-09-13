@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { ArrowLeft, Copy, Check, Download, X, FileText, Code, Maximize2 } from "lucide-react"
+import { ArrowLeft, Copy, Check, Download, X, FileText, Code, Maximize2, RefreshCw } from "lucide-react"
 import { useChats } from "@/context/chat-context"
 import { MarkdownRenderer } from "@/components/markdown-renderer"
 import type { ArtifactPart } from "@/types/message"
+import { fetchArtifacts, type Artifact } from "@/lib/backend-runtime"
 import { codeToHtml } from "shiki"
 
 interface ArtifactPanelProps {
@@ -146,8 +147,56 @@ function DetailView({ artifact, onBack, onClose }: { artifact: ArtifactPart; onB
 }
 
 export function ArtifactPanel({ chatId }: ArtifactPanelProps) {
-  const { activeArtifactId, openArtifact, closeArtifactPanel, getArtifactsForChat } = useChats()
-  const artifacts = useMemo(() => getArtifactsForChat(chatId), [getArtifactsForChat, chatId])
+  const { activeArtifactId, openArtifact, closeArtifactPanel, getArtifactsForChat, addArtifact } = useChats()
+  const [backendArtifacts, setBackendArtifacts] = useState<Artifact[]>([])
+  const [loading, setLoading] = useState(true)
+
+  // Fetch artifacts from backend on mount
+  useEffect(() => {
+    let cancelled = false
+    fetchArtifacts(chatId).then((artifacts) => {
+      if (!cancelled) {
+        setBackendArtifacts(artifacts)
+        setLoading(false)
+        // Also add to local chat context for backward compatibility
+        for (const a of artifacts) {
+          addArtifact(chatId, {
+            type: "artifact",
+            id: a.id,
+            name: a.name,
+            content: a.content,
+            artifactType: a.artifact_type as "document" | "code",
+            language: a.language,
+            createdAt: new Date(a.created_at).getTime(),
+          })
+        }
+      }
+    })
+    return () => { cancelled = true }
+  }, [chatId, addArtifact])
+
+  const artifacts = useMemo(() => {
+    const localArtifacts = getArtifactsForChat(chatId)
+    // Merge local and backend artifacts, preferring backend for ID matching
+    const merged = new Map<string, ArtifactPart>()
+    for (const a of localArtifacts) merged.set(a.id, a)
+    for (const a of backendArtifacts) {
+      const existing = merged.get(a.id)
+      if (!existing || new Date(a.created_at).getTime() > existing.createdAt) {
+        merged.set(a.id, {
+          type: "artifact",
+          id: a.id,
+          name: a.name,
+          content: a.content,
+          artifactType: a.artifact_type as "document" | "code",
+          language: a.language,
+          createdAt: new Date(a.created_at).getTime(),
+        })
+      }
+    }
+    return Array.from(merged.values())
+  }, [getArtifactsForChat, chatId, backendArtifacts])
+
   const activeArtifact = useMemo(
     () => artifacts.find((a) => a.id === activeArtifactId) ?? null,
     [artifacts, activeArtifactId]
@@ -158,6 +207,25 @@ export function ArtifactPanel({ chatId }: ArtifactPanelProps) {
       downloadFile(artifact.name, artifact.content)
     }
   }, [artifacts])
+
+  const handleRefresh = useCallback(() => {
+    setLoading(true)
+    fetchArtifacts(chatId).then((fetched) => {
+      setBackendArtifacts(fetched)
+      setLoading(false)
+      for (const a of fetched) {
+        addArtifact(chatId, {
+          type: "artifact",
+          id: a.id,
+          name: a.name,
+          content: a.content,
+          artifactType: a.artifact_type as "document" | "code",
+          language: a.language,
+          createdAt: new Date(a.created_at).getTime(),
+        })
+      }
+    })
+  }, [chatId, addArtifact])
 
   return (
     <div className="flex flex-col h-full border-l border-white/10 bg-neutral-950/80">
@@ -171,18 +239,29 @@ export function ArtifactPanel({ chatId }: ArtifactPanelProps) {
         <>
           <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 shrink-0">
             <div className="text-sm font-medium text-white/90">Artifacts</div>
-            {artifacts.length > 0 && (
+            <div className="flex items-center gap-1.5">
+              {loading && <RefreshCw className="size-3.5 text-white/50 animate-spin" />}
+              {artifacts.length > 0 && (
+                <button
+                  onClick={handleDownloadAll}
+                  className="flex items-center gap-1.5 text-[11px] text-white/50 hover:text-white/80 transition-colors cursor-pointer px-2 py-1 rounded hover:bg-white/5"
+                >
+                  <Download className="size-3" />
+                  <span>Download all</span>
+                </button>
+              )}
               <button
-                onClick={handleDownloadAll}
-                className="flex items-center gap-1.5 text-[11px] text-white/50 hover:text-white/80 transition-colors cursor-pointer px-2 py-1 rounded hover:bg-white/5"
+                onClick={handleRefresh}
+                disabled={loading}
+                className="p-1.5 rounded hover:bg-white/10 transition-colors cursor-pointer text-white/50 hover:text-white/80"
+                title="Refresh artifacts"
               >
-                <Download className="size-3" />
-                <span>Download all</span>
+                <RefreshCw className="size-3.5" />
               </button>
-            )}
+            </div>
           </div>
           <div className="flex-1 min-h-0 overflow-auto p-2">
-            {artifacts.length === 0 ? (
+            {artifacts.length === 0 && !loading ? (
               <div className="flex items-center justify-center h-full text-white/40 text-sm">
                 No artifacts yet
               </div>

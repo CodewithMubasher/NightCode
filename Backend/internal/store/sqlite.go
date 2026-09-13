@@ -11,19 +11,26 @@ import (
 )
 
 type MessageRow struct {
-	ID        string
-	ChatID    string
-	Role      string
-	Segments  json.RawMessage
-	CreatedAt time.Time
+	ID        string          `json:"id"`
+	ChatID    string          `json:"chat_id"`
+	Role      string          `json:"role"`
+	Segments  json.RawMessage `json:"segments"`
+	CreatedAt time.Time       `json:"created_at"`
 }
 
 type ChatRow struct {
-	ID          string
-	WorkspaceID string
-	Title       string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID          string    `json:"id"`
+	WorkspaceID string    `json:"workspace_id"`
+	Title       string    `json:"title"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type WorkspaceRow struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 type Store struct {
@@ -72,6 +79,55 @@ func migrate(db *sql.DB) error {
 			segments TEXT NOT NULL DEFAULT '[]',
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
+		);
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS tool_calls (
+			id TEXT PRIMARY KEY,
+			chat_id TEXT NOT NULL,
+			message_id TEXT NOT NULL DEFAULT '',
+			tool_call_id TEXT NOT NULL,
+			name TEXT NOT NULL,
+			status TEXT NOT NULL,
+			input TEXT NOT NULL DEFAULT '',
+			output TEXT NOT NULL DEFAULT '',
+			error TEXT NOT NULL DEFAULT '',
+			started_at INTEGER NOT NULL DEFAULT 0,
+			completed_at INTEGER NOT NULL DEFAULT 0,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
+		);
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS artifacts (
+			id TEXT PRIMARY KEY,
+			chat_id TEXT NOT NULL,
+			name TEXT NOT NULL,
+			artifact_type TEXT NOT NULL,
+			language TEXT NOT NULL DEFAULT '',
+			content TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
+		);
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS workspaces (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			description TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 		);
 	`)
 	return err
@@ -164,4 +220,117 @@ func (s *Store) GetChat(id string) (*ChatRow, error) {
 		return nil, err
 	}
 	return &c, nil
+}
+
+// InsertToolCall persists a single tool call audit row.
+func (s *Store) InsertToolCall(id, chatID, messageID, toolCallID, name, status, input, output, errStr string, startedAt, completedAt int64) error {
+	_, err := s.db.Exec(`
+		INSERT INTO tool_calls (id, chat_id, message_id, tool_call_id, name, status, input, output, error, started_at, completed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, id, chatID, messageID, toolCallID, name, status, input, output, errStr, startedAt, completedAt)
+	if err != nil {
+		log.Printf("insert tool_call error: %v", err)
+	}
+	return err
+}
+
+// InsertArtifact persists an artifact row.
+func (s *Store) InsertArtifact(id, chatID, name, artifactType, language, content string) error {
+	_, err := s.db.Exec(`
+		INSERT INTO artifacts (id, chat_id, name, artifact_type, language, content)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, id, chatID, name, artifactType, language, content)
+	if err != nil {
+		log.Printf("insert artifact error: %v", err)
+	}
+	return err
+}
+
+// UpsertWorkspace creates or updates a workspace.
+func (s *Store) UpsertWorkspace(id, name, description string) error {
+	now := time.Now().UTC()
+	_, err := s.db.Exec(`
+		INSERT INTO workspaces (id, name, description, created_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET name=excluded.name, description=excluded.description
+	`, id, name, description, now)
+	if err != nil {
+		log.Printf("upsert workspace error: %v", err)
+	}
+	return err
+}
+
+// GetWorkspace returns a single workspace.
+func (s *Store) GetWorkspace(id string) (*WorkspaceRow, error) {
+	var w WorkspaceRow
+	err := s.db.QueryRow(
+		`SELECT id, name, description, created_at FROM workspaces WHERE id = ?`, id,
+	).Scan(&w.ID, &w.Name, &w.Description, &w.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &w, nil
+}
+
+// GetWorkspaces returns all workspaces.
+func (s *Store) GetWorkspaces() ([]WorkspaceRow, error) {
+	rows, err := s.db.Query(
+		`SELECT id, name, description, created_at FROM workspaces ORDER BY created_at DESC`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var workspaces []WorkspaceRow
+	for rows.Next() {
+		var w WorkspaceRow
+		if err := rows.Scan(&w.ID, &w.Name, &w.Description, &w.CreatedAt); err != nil {
+			return nil, err
+		}
+		workspaces = append(workspaces, w)
+	}
+	return workspaces, rows.Err()
+}
+
+// DeleteWorkspace deletes a workspace.
+func (s *Store) DeleteWorkspace(id string) error {
+	_, err := s.db.Exec(`DELETE FROM workspaces WHERE id = ?`, id)
+	if err != nil {
+		log.Printf("delete workspace error: %v", err)
+	}
+	return err
+}
+
+// ArtifactRow represents a stored artifact.
+type ArtifactRow struct {
+	ID           string    `json:"id"`
+	ChatID       string    `json:"chat_id"`
+	Name         string    `json:"name"`
+	ArtifactType string    `json:"artifact_type"`
+	Language     string    `json:"language"`
+	Content      string    `json:"content"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+// GetArtifactsForChat returns all artifacts for a chat.
+func (s *Store) GetArtifactsForChat(chatID string) ([]ArtifactRow, error) {
+	rows, err := s.db.Query(
+		`SELECT id, chat_id, name, artifact_type, language, content, created_at FROM artifacts WHERE chat_id = ? ORDER BY created_at ASC`,
+		chatID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var artifacts []ArtifactRow
+	for rows.Next() {
+		var a ArtifactRow
+		if err := rows.Scan(&a.ID, &a.ChatID, &a.Name, &a.ArtifactType, &a.Language, &a.Content, &a.CreatedAt); err != nil {
+			return nil, err
+		}
+		artifacts = append(artifacts, a)
+	}
+	return artifacts, rows.Err()
 }

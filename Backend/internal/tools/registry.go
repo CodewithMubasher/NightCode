@@ -14,6 +14,7 @@ func NewRegistry() ToolRegistry {
 	r.Register(&ListDirTool{})
 	r.Register(&GitStatusTool{})
 	r.Register(&GitDiffTool{})
+	r.Register(&ShellTool{})
 	return r
 }
 

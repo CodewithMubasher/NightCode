@@ -12,6 +12,9 @@ import (
 
 const grepMaxMatches = 200
 
+// rgLookPath is injectable so tests can force the native fallback path.
+var rgLookPath = exec.LookPath
+
 type GrepInput struct {
 	Pattern  string `json:"pattern"`
 	PathGlob string `json:"path_glob,omitempty"`
@@ -55,7 +58,7 @@ func (t *GrepTool) Execute(ctx context.Context, input json.RawMessage, ws *Works
 	}
 
 	// Try rg (ripgrep) first — it's faster and handles binary/encoding automatically
-	if rgPath, err := exec.LookPath("rg"); err == nil {
+	if rgPath, err := rgLookPath("rg"); err == nil {
 		return t.execRg(ctx, rgPath, in, ws)
 	}
 

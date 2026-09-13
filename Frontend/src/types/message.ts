@@ -7,6 +7,7 @@ export interface ToolCallEntry {
   error?: string
   startedAt: number
   completedAt?: number
+  artifactId?: string
 }
 
 export type TurnSegment =

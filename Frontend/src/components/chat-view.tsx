@@ -16,6 +16,8 @@ import { Eclipse, Copy, ThumbsUp, ThumbsDown, RotateCcw, FileText } from "lucide
 import { emitFakeRuntime } from "@/lib/runtime"
 import { emitBackendRuntime, cancelBackendRun } from "@/lib/backend-runtime"
 import type { RuntimeEvent, ArtifactCreatedEvent } from "@/types/events"
+import type { ModelOption } from "@/lib/backend-runtime"
+import { takePendingModel } from "@/lib/pending-model"
 import type { AttachmentPart, TurnSegment, ToolCallEntry } from "@/types/message"
 import { AttachmentCard, isMarkdownFile } from "@/components/attachment-card"
 
@@ -96,6 +98,14 @@ function accumulateSegments(events: RuntimeEvent[]): TurnSegment[] {
           call.completedAt = event.timestamp
         }
       }
+    } else if (event.type === "artifact.created") {
+      if (event.toolCallId) {
+        const calls = toolSegments.get(event.segmentId)
+        const call = calls?.find((c) => c.toolCallId === event.toolCallId)
+        if (call) {
+          call.artifactId = event.artifactId
+        }
+      }
     }
   }
 
@@ -107,6 +117,32 @@ function accumulateSegments(events: RuntimeEvent[]): TurnSegment[] {
   })
 }
 
+// mergeAdjacentToolGroups collapses consecutive tool-group segments into one
+// group, as long as there's no text segment between them. The backend
+// starts a fresh segment on every agent-loop iteration (one real provider
+// call each), so a "call tool A, then immediately call tool B with no text
+// in between" turn arrives as two separate tool-group segments — but from
+// the user's perspective that's a single burst of tool use and should
+// collapse to one "Ran 2 commands" timeline, not two back-to-back
+// mini-timelines. A text segment in between is a deliberate break: the
+// model said something to the user before continuing, so the next tool
+// group starts fresh.
+function mergeAdjacentToolGroups(segments: TurnSegment[]): TurnSegment[] {
+  const merged: TurnSegment[] = []
+  for (const seg of segments) {
+    const prev = merged[merged.length - 1]
+    if (seg.type === "tool-group" && prev?.type === "tool-group") {
+      prev.calls = [...prev.calls, ...seg.calls]
+      continue
+    }
+    // Shallow-copy tool-group segments before pushing so later merges don't
+    // mutate a segment object that might still be referenced elsewhere
+    // (e.g. React keys/memoization upstream).
+    merged.push(seg.type === "tool-group" ? { ...seg, calls: [...seg.calls] } : seg)
+  }
+  return merged
+}
+
 export function ChatView({ chatId }: ChatViewProps) {
   const { getChat, addMessage, addArtifact, isArtifactPanelOpen, openArtifact, openArtifactPanel, closeArtifactPanel } = useChats()
   const chat = getChat(chatId)
@@ -114,6 +150,7 @@ export function ChatView({ chatId }: ChatViewProps) {
   const [events, setEvents] = useState<RuntimeEvent[]>([])
   const [currentText, setCurrentText] = useState("")
   const [errorText, setErrorText] = useState("")
+  const [retryStatus, setRetryStatus] = useState<{ attempt: number; maxAttempt: number; retryAfterMs: number; reason: string } | null>(null)
 
   const eventsRef = useRef<RuntimeEvent[]>([])
   const currentTextRef = useRef("")
@@ -121,11 +158,11 @@ export function ChatView({ chatId }: ChatViewProps) {
   const hasTriggeredRef = useRef(false)
 
   const segments = useMemo(
-    () => accumulateSegments(events),
+    () => mergeAdjacentToolGroups(accumulateSegments(events)),
     [events]
   )
 
-  const agentError = events.some((e) => e.type === "agent.error")
+  const agentError = events.some((e) => e.type === "agent.error" || e.type === "turn.error")
   const hasDone = events.some((e) => e.type === "assistant.delta" && e.text === "__DONE__")
 
   let phase: "idle" | "active" | "error" = "idle"
@@ -150,10 +187,11 @@ export function ChatView({ chatId }: ChatViewProps) {
     hasTriggeredRef.current = true
     const lastUserMsg = chat.messages.filter((m) => m.role === "user").pop()
     const userText = lastUserMsg?.parts.find((p) => p.type === "text")?.text ?? ""
-    startRuntime(userText)
-  }, [chat])
+    const model = takePendingModel(chatId)
+    startRuntime(userText, model)
+  }, [chat, chatId])
 
-  const startRuntime = useCallback((userMessage?: string) => {
+  const startRuntime = useCallback((userMessage?: string, model?: ModelOption | null) => {
     setEvents([])
     eventsRef.current = []
     setCurrentText("")
@@ -217,8 +255,18 @@ export function ChatView({ chatId }: ChatViewProps) {
       cleanupRef.current = cleanup
     } else {
       const workspaceId = chat?.workspaceId
+      const turnFinalizedRef = { current: false }
       const cleanup = emitBackendRuntime({
         onEvent: (event) => {
+          // Once a turn has been finalized (via __DONE__ or an error), any
+          // further events for this same run — e.g. the trailing
+          // turn.completed that arrives right after __DONE__ — must not be
+          // pushed into `events` again. Doing so previously re-triggered
+          // isLive (events.length > 0, no __DONE__ in the fresh array),
+          // producing a phantom empty assistant bubble with a stuck
+          // "stop" affordance until the user manually cancelled.
+          if (turnFinalizedRef.current) return
+
           setEvents((prev) => {
             const next = [...prev, event]
             eventsRef.current = next
@@ -227,6 +275,8 @@ export function ChatView({ chatId }: ChatViewProps) {
 
           if (event.type === "assistant.delta") {
             if (event.text === "__DONE__") {
+              turnFinalizedRef.current = true
+              setRetryStatus(null)
               const snapshot = eventsRef.current
               const accumulated = accumulateSegments(snapshot)
 
@@ -242,8 +292,10 @@ export function ChatView({ chatId }: ChatViewProps) {
             }
           }
 
-          if (event.type === "agent.error") {
+          if (event.type === "agent.error" || event.type === "turn.error") {
+            turnFinalizedRef.current = true
             setErrorText(event.error)
+            setRetryStatus(null)
             addMessage(chatId, "assistant", [
               { type: "text", text: `Error: ${event.error}` },
             ])
@@ -251,6 +303,15 @@ export function ChatView({ chatId }: ChatViewProps) {
             currentTextRef.current = ""
             setEvents([])
             eventsRef.current = []
+          }
+
+          if (event.type === "turn.retry") {
+            setRetryStatus({
+              attempt: event.attempt,
+              maxAttempt: event.maxAttempt,
+              retryAfterMs: event.retryAfterMs,
+              reason: event.error,
+            })
           }
 
           if (event.type === "artifact.created") {
@@ -266,13 +327,13 @@ export function ChatView({ chatId }: ChatViewProps) {
             })
           }
         },
-      }, userMessage ?? "", chatId, workspaceId)
+      }, userMessage ?? "", chatId, workspaceId, model)
 
       cleanupRef.current = cleanup
     }
   }, [chatId, chat?.workspaceId, addMessage, addArtifact])
 
-  const handleSend = useCallback((message: string, attachments: AttachmentPart[] = []) => {
+  const handleSend = useCallback((message: string, attachments: AttachmentPart[] = [], model?: ModelOption | null) => {
     if (cleanupRef.current) {
       cleanupRef.current()
       cleanupRef.current = null
@@ -285,7 +346,7 @@ export function ChatView({ chatId }: ChatViewProps) {
     ]
     addMessage(chatId, "user", parts)
 
-    startRuntime(message)
+    startRuntime(message, model)
   }, [chatId, addMessage, startRuntime])
 
   const handleCancel = useCallback(() => {
@@ -300,16 +361,36 @@ export function ChatView({ chatId }: ChatViewProps) {
 
     if (currentTextRef.current || segments.length > 0) {
       addMessage(chatId, "assistant", [], segments)
+    } else {
+      // Nothing was produced yet (e.g. cancelled mid-retry-backoff, before
+      // any text or tool call arrived) — leave a visible trace instead of
+      // just clearing state, so the message doesn't appear to have
+      // silently vanished.
+      addMessage(chatId, "assistant", [
+        { type: "text", text: "Cancelled." },
+      ])
     }
 
     setCurrentText("")
     currentTextRef.current = ""
     setEvents([])
     eventsRef.current = []
+    setRetryStatus(null)
   }, [chatId, chat?.workspaceId, addMessage, segments])
 
   const handleOpenToolArtifact = useCallback((call: ToolCallEntry) => {
     if (call.name === "read_file") return
+
+    // Prefer the real artifact created by the tool (e.g. write_file) — it
+    // has the actual file content/language the backend produced, already
+    // stored via the artifact.created event handler above. Falling back to
+    // rebuilding a fake artifact from input/output (below) is only for
+    // tools that don't produce a real artifact, like shell.
+    if (call.artifactId) {
+      openArtifact(call.artifactId)
+      return
+    }
+
     const artifactId = `tool-${call.toolCallId}`
     const input = typeof call.input === "string" ? call.input : ""
     const output = typeof call.output === "string" ? call.output : ""
@@ -419,7 +500,7 @@ export function ChatView({ chatId }: ChatViewProps) {
                         <div className="flex flex-col ml-1">
                           {msg.segments && msg.segments.length > 0 && (
                             <>
-                              {msg.segments.map((segment) => {
+                              {mergeAdjacentToolGroups(msg.segments).map((segment) => {
                                 if (segment.type === "text" && segment.text) {
                                   return <div key={segment.id} className="mb-1"><MarkdownRenderer content={segment.text} /></div>
                                 }
@@ -439,6 +520,7 @@ export function ChatView({ chatId }: ChatViewProps) {
                                       key={segment.id}
                                       isAgentStarted={true}
                                       isAgentCompleted={true}
+                                      startCollapsed={true}
                                       toolEvents={toolEventsForTimeline}
                                       toolCalls={segment.calls}
                                       onOpenArtifact={handleOpenToolArtifact}
@@ -502,6 +584,15 @@ export function ChatView({ chatId }: ChatViewProps) {
                     </div>
                     <div className="max-w-[80%] flex-1 min-w-0">
                       <div className="flex flex-col ml-1">
+                        {retryStatus && (
+                          <div className="mb-1 text-xs text-amber-400/80 flex items-center gap-1.5">
+                            <span className="size-1.5 rounded-full bg-amber-400/80 animate-pulse" />
+                            <span>
+                              Rate limited — retrying ({retryStatus.attempt}/{retryStatus.maxAttempt}) in{" "}
+                              {Math.ceil(retryStatus.retryAfterMs / 1000)}s…
+                            </span>
+                          </div>
+                        )}
                         {segments.map((segment) => {
                           if (segment.type === "text" && segment.text) {
                             return <div key={segment.id} className="mb-1"><MarkdownRenderer content={segment.text} isStreaming /></div>

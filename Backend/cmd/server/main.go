@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/CodewithMubasher/NightCode/backend/internal/api"
+	"github.com/CodewithMubasher/NightCode/backend/internal/provider"
 	"github.com/CodewithMubasher/NightCode/backend/internal/store"
 	"github.com/CodewithMubasher/NightCode/backend/internal/tools"
 )
@@ -38,17 +40,73 @@ func main() {
 	h := api.NewHandler(s)
 	registry := tools.NewRegistry()
 
+	// Provider selection: NIGHTCODE_PROVIDER=echo|gemini|groq (default gemini)
+	providerMode := os.Getenv("NIGHTCODE_PROVIDER")
+	if providerMode == "" {
+		providerMode = "gemini"
+	}
+
+	switch providerMode {
+	case "gemini":
+		apiKey := os.Getenv("GEMINI_API_KEY")
+		model := os.Getenv("GEMINI_MODEL")
+		if apiKey == "" {
+			log.Println("WARNING: GEMINI_API_KEY not set; falling back to echo agent")
+		} else {
+			p, err := provider.NewGeminiProvider(context.Background(), apiKey, model)
+			if err != nil {
+				log.Fatalf("failed to create gemini provider: %v", err)
+			}
+			h.SetProvider(p)
+			h.SetDefaultProviderInfo("gemini", modelOr(model))
+			log.Printf("using gemini provider (model=%s)", modelOr(model))
+		}
+	case "groq":
+		apiKey := os.Getenv("GROQ_API_KEY")
+		model := os.Getenv("GROQ_MODEL")
+		baseURL := os.Getenv("GROQ_BASE_URL")
+		if apiKey == "" {
+			log.Println("WARNING: GROQ_API_KEY not set; falling back to echo agent")
+		} else {
+			p, err := provider.NewGroqProvider(context.Background(), apiKey, model, baseURL)
+			if err != nil {
+				log.Fatalf("failed to create groq provider: %v", err)
+			}
+			h.SetProvider(p)
+			h.SetDefaultProviderInfo("groq", groqModelOr(model))
+			log.Printf("using groq provider (model=%s)", groqModelOr(model))
+		}
+	default:
+		log.Println("using echo agent (NIGHTCODE_PROVIDER=echo)")
+	}
+
+	// Workspace root base dir
+	if wr := os.Getenv("NIGHTCODE_WORKSPACES_ROOT"); wr != "" {
+		h.SetWorkspacesRoot(wr)
+	}
+
 	mux := http.NewServeMux()
 
 	// SSE endpoint — POST streams RuntimeEvents
 	mux.HandleFunc("POST /api/workspaces/{workspaceId}/chats/{chatId}/messages", h.HandleSendMessage)
 
 	// Cancel endpoint — DELETE cancels an in-flight run
+	mux.HandleFunc("DELETE /api/workspaces/{workspaceId}/chats/{chatId}/runs/current", h.HandleCancelRun)
 	mux.HandleFunc("DELETE /api/workspaces/{workspaceId}/chats/{chatId}/runs/{runId}", h.HandleCancelRun)
+
+	// Models endpoint — lists usable models based on which provider API keys
+	// are configured, so the frontend's model picker reflects reality.
+	mux.HandleFunc("GET /api/models", h.HandleListModels)
+
+	// Workspace endpoints
+	mux.HandleFunc("GET /api/workspaces", h.HandleListWorkspaces)
+	mux.HandleFunc("POST /api/workspaces", h.HandleCreateWorkspace)
+	mux.HandleFunc("DELETE /api/workspaces/{workspaceId}", h.HandleDeleteWorkspace)
 
 	// History endpoints
 	mux.HandleFunc("GET /api/workspaces/{workspaceId}/chats", h.HandleListChats)
 	mux.HandleFunc("GET /api/workspaces/{workspaceId}/chats/{chatId}/messages", h.HandleListMessages)
+	mux.HandleFunc("GET /api/workspaces/{workspaceId}/chats/{chatId}/artifacts", h.HandleListArtifacts)
 
 	// Debug tools endpoint — gated behind NIGHTCODE_DEBUG_TOOLS=true
 	if os.Getenv("NIGHTCODE_DEBUG_TOOLS") == "true" {
@@ -147,6 +205,20 @@ func makeDebugToolListHandler(registry tools.ToolRegistry) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(toolsList)
 	}
+}
+
+func modelOr(model string) string {
+	if model == "" {
+		return "gemini-3.6-flash"
+	}
+	return model
+}
+
+func groqModelOr(model string) string {
+	if model == "" {
+		return "openai/gpt-oss-20b"
+	}
+	return model
 }
 
 func corsMiddleware(next http.Handler, allowedOrigin string) http.Handler {

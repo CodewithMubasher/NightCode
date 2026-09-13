@@ -2,6 +2,7 @@ import { Eclipse, Plus, Paperclip, ArrowUp, Square, ShieldCheck, Zap, ShieldAler
 import { useState, useRef, useEffect, type KeyboardEvent } from "react"
 import { AttachmentCard } from "@/components/attachment-card"
 import type { AttachmentPart } from "@/types/message"
+import { fetchModels, type ModelOption } from "@/lib/backend-runtime"
 
 const options = [
   { value: "readonly", label: "Read Only", icon: ShieldCheck },
@@ -9,13 +10,10 @@ const options = [
   { value: "full", label: "Full Access", icon: ShieldAlert },
 ]
 
-const models = [
-  { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
-  { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
-  { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },
-  { value: "gemini-2.0-flash-lite", label: "Gemini 2.0 Flash-Lite" },
-  { value: "gemini-1.5-pro", label: "Gemini 1.5 Pro" },
-]
+const PROVIDER_LABELS: Record<string, string> = {
+  gemini: "Google",
+  groq: "Groq",
+}
 
 const ACCEPTED_EXTENSIONS = new Set([
   ".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs", ".java", ".c", ".cpp",
@@ -53,7 +51,7 @@ function readFileAsText(file: File): Promise<string> {
 }
 
 interface PromptInputProps {
-  onSend?: (message: string, attachments: AttachmentPart[]) => void
+  onSend?: (message: string, attachments: AttachmentPart[], model?: ModelOption | null) => void
   onCancel?: () => void
   isInChat?: boolean
   isGenerating?: boolean
@@ -65,7 +63,8 @@ export function PromptInput({ onSend, onCancel, isInChat = false, isGenerating =
   const [value, setValue] = useState("")
   const [selected, setSelected] = useState("readonly")
   const [open, setOpen] = useState(false)
-  const [selectedModel, setSelectedModel] = useState("")
+  const [models, setModels] = useState<ModelOption[]>([])
+  const [selectedModel, setSelectedModel] = useState<ModelOption | null>(null)
   const [modelOpen, setModelOpen] = useState(false)
   const [attachments, setAttachments] = useState<AttachmentPart[]>([])
   const ref = useRef<HTMLDivElement>(null)
@@ -87,6 +86,24 @@ export function PromptInput({ onSend, onCancel, isInChat = false, isGenerating =
     document.addEventListener("mousedown", handleClickOutside)
     return () => document.removeEventListener("mousedown", handleClickOutside)
   }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    fetchModels().then((list) => {
+      if (cancelled) return
+      setModels(list)
+      const def = list.find((m) => m.default) ?? list[0] ?? null
+      setSelectedModel((prev) => prev ?? def)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const modelsByProvider = models.reduce<Record<string, ModelOption[]>>((acc, m) => {
+    ;(acc[m.provider] ??= []).push(m)
+    return acc
+  }, {})
 
   const handleFiles = async (files: FileList | null) => {
     if (!files) return
@@ -123,7 +140,7 @@ export function PromptInput({ onSend, onCancel, isInChat = false, isGenerating =
 
   const handleSend = () => {
     if (!value.trim() && attachments.length === 0) return
-    onSend?.(value.trim(), attachments)
+    onSend?.(value.trim(), attachments, selectedModel)
     setValue("")
     setAttachments([])
     textareaRef.current?.focus()
@@ -206,23 +223,34 @@ export function PromptInput({ onSend, onCancel, isInChat = false, isGenerating =
             onClick={() => setModelOpen(!modelOpen)}
             className="flex h-7 items-center gap-1.5 rounded-full bg-white/0 px-2.5 text-white/70 text-xs cursor-pointer hover:bg-white/10"
           >
-            <span>{selectedModel || "Select model"}</span>
+            <span>{selectedModel?.label || (models.length === 0 ? "No models configured" : "Select model")}</span>
             <ChevronDown className={`size-3.5 transition-transform duration-200 ${modelOpen ? "rotate-180" : ""}`} />
           </button>
           {modelOpen && (
-            <div className="absolute bottom-full right-0 mb-1 w-52 rounded-xl border border-white/10 bg-neutral-900 shadow-lg overflow-hidden z-50">
-              <div className="px-3 py-1.5 text-[10px] font-medium text-white/40 uppercase tracking-wider">Google</div>
-              {models.map((model) => (
-                <button
-                  key={model.value}
-                  onClick={() => {
-                    setSelectedModel(model.label)
-                    setModelOpen(false)
-                  }}
-                  className={`flex w-full items-center gap-2 px-3 py-1.5 text-xs text-white hover:bg-white/10 cursor-pointer ${selectedModel === model.label ? "bg-white/5" : ""}`}
-                >
-                  <span>{model.label}</span>
-                </button>
+            <div className="absolute bottom-full right-0 mb-1 w-56 rounded-xl border border-white/10 bg-neutral-900 shadow-lg overflow-hidden z-50 max-h-80 overflow-y-auto">
+              {models.length === 0 && (
+                <div className="px-3 py-2 text-xs text-white/40">
+                  No models available — set GEMINI_API_KEY or GROQ_API_KEY on the backend.
+                </div>
+              )}
+              {Object.entries(modelsByProvider).map(([provider, providerModels]) => (
+                <div key={provider}>
+                  <div className="px-3 py-1.5 text-[10px] font-medium text-white/40 uppercase tracking-wider">
+                    {PROVIDER_LABELS[provider] ?? provider}
+                  </div>
+                  {providerModels.map((model) => (
+                    <button
+                      key={`${model.provider}:${model.id}`}
+                      onClick={() => {
+                        setSelectedModel(model)
+                        setModelOpen(false)
+                      }}
+                      className={`flex w-full items-center gap-2 px-3 py-1.5 text-xs text-white hover:bg-white/10 cursor-pointer ${selectedModel?.provider === model.provider && selectedModel?.id === model.id ? "bg-white/5" : ""}`}
+                    >
+                      <span>{model.label}</span>
+                    </button>
+                  ))}
+                </div>
               ))}
             </div>
           )}

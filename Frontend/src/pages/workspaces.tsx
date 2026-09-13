@@ -11,63 +11,53 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { DropdownMenu, DropdownMenuItem } from "@/components/ui/dropdown-menu"
+import { fetchWorkspaces, createWorkspace, deleteWorkspace } from "@/lib/backend-runtime"
 
 interface Workspace {
   id: string
   name: string
   description: string
-  createdAt: number
+  created_at: string
 }
 
-const STORAGE_KEY = "nightcode-workspaces"
-
-function loadWorkspaces(): Workspace[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return []
-    return JSON.parse(raw) as Workspace[]
-  } catch {
-    return []
-  }
-}
-
-function saveWorkspaces(workspaces: Workspace[]) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(workspaces))
-  } catch {}
-}
-
-function formatDate(ts: number): string {
+function formatDate(ts: string): string {
   return new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
 }
 
 export function Workspaces() {
   const navigate = useNavigate()
-  const [workspaces, setWorkspaces] = useState<Workspace[]>(loadWorkspaces)
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([])
+  const [loading, setLoading] = useState(true)
   const [open, setOpen] = useState(false)
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
 
   useEffect(() => {
-    saveWorkspaces(workspaces)
-  }, [workspaces])
+    fetchWorkspaces().then((ws) => {
+      setWorkspaces(ws)
+      setLoading(false)
+    })
+  }, [])
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     if (!name.trim()) return
-    const ws: Workspace = {
-      id: crypto.randomUUID(),
-      name: name.trim(),
-      description: description.trim(),
-      createdAt: Date.now(),
+    const id = await createWorkspace(name.trim(), description.trim())
+    if (id) {
+      // Refresh the list
+      const ws = await fetchWorkspaces()
+      setWorkspaces(ws)
+      setName("")
+      setDescription("")
+      setOpen(false)
     }
-    setWorkspaces((prev) => [ws, ...prev])
-    setName("")
-    setDescription("")
-    setOpen(false)
   }
 
-  const handleDelete = (id: string) => {
-    setWorkspaces((prev) => prev.filter((w) => w.id !== id))
+  const handleDelete = async (id: string) => {
+    const ok = await deleteWorkspace(id)
+    if (ok) {
+      const ws = await fetchWorkspaces()
+      setWorkspaces(ws)
+    }
   }
 
   return (
@@ -94,7 +84,11 @@ export function Workspaces() {
       </div>
 
       <div className="flex-1 overflow-auto pb-6">
-        {workspaces.length === 0 ? (
+        {loading ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="size-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : workspaces.length === 0 ? (
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
               <div className="size-12 rounded-xl bg-white/5 flex items-center justify-center mx-auto mb-3">
@@ -121,7 +115,7 @@ export function Workspaces() {
                     }
                     align="right"
                   >
-                    <DropdownMenuItem variant="destructive" onClick={() => handleDelete(ws.id)}>
+                    <DropdownMenuItem variant="destructive" onClick={(e) => { e.stopPropagation(); handleDelete(ws.id) }}>
                       <span>Delete</span>
                     </DropdownMenuItem>
                   </DropdownMenu>
@@ -131,7 +125,7 @@ export function Workspaces() {
                   <p className="text-xs text-white/50 mt-1 line-clamp-2">{ws.description}</p>
                 )}
                 <div className="mt-auto pt-3">
-                  <span className="text-[11px] text-white/30">{formatDate(ws.createdAt)}</span>
+                  <span className="text-[11px] text-white/30">{formatDate(ws.created_at)}</span>
                 </div>
               </div>
             ))}

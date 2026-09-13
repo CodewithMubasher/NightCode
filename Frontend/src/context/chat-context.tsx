@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect, useMemo, type ReactNode } from "react"
 import { type Chat, type Message, type MessagePart, type ArtifactPart, type TurnSegment, generateId, truncateTitle } from "@/types/message"
+import { fetchChats, fetchMessages, type ChatRow, type MessageRow } from "@/lib/backend-runtime"
 
 const STORAGE_KEY = "nightcode-chats"
 
@@ -20,6 +21,37 @@ function saveChats(chats: Chat[]) {
   } catch {}
 }
 
+function extractTextFromSegments(segments: string): string {
+  if (!segments) return ""
+  try {
+    const segs = JSON.parse(segments) as Array<{ type: string; text?: string }>
+    return segs.filter((s) => s.type === "text").map((s) => s.text || "").join("")
+  } catch {
+    return ""
+  }
+}
+
+function convertMessageRow(row: MessageRow): Message {
+  const segments = extractTextFromSegments(row.segments)
+  return {
+    id: row.id,
+    role: row.role as "user" | "assistant",
+    parts: segments ? [{ type: "text" as const, text: segments }] : [],
+    timestamp: new Date(row.created_at).getTime(),
+  }
+}
+
+function convertChatRow(row: ChatRow): Chat {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    title: row.title,
+    messages: [],
+    artifacts: [],
+    createdAt: new Date(row.created_at).getTime(),
+  }
+}
+
 interface ChatContextType {
   chats: Chat[]
   getChat: (id: string) => Chat | undefined
@@ -28,6 +60,8 @@ interface ChatContextType {
   addArtifact: (chatId: string, artifact: ArtifactPart) => void
   deleteChat: (chatId: string) => void
   togglePinChat: (chatId: string) => void
+  loadChatsForWorkspace: (workspaceId: string) => Promise<void>
+  loadMessagesForChat: (chatId: string) => Promise<void>
   isArtifactPanelOpen: boolean
   activeArtifactId: string | null
   openArtifactPanel: () => void
@@ -133,6 +167,31 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     )
   }, [])
 
+  const loadChatsForWorkspace = useCallback(async (workspaceId: string) => {
+    const backendChats = await fetchChats(workspaceId)
+    const converted = backendChats.map(convertChatRow)
+    // Merge with local chats, preferring backend for same IDs
+    const merged = new Map<string, Chat>()
+    for (const c of chats) merged.set(c.id, c)
+    for (const c of converted) merged.set(c.id, c)
+    setChats(Array.from(merged.values()))
+  }, [chats])
+
+  const loadMessagesForChat = useCallback(async (chatId: string) => {
+    const backendMessages = await fetchMessages(chatId)
+    const converted = backendMessages.map(convertMessageRow)
+    setChats((prev) =>
+      prev.map((chat) => {
+        if (chat.id !== chatId) return chat
+        // Merge messages, preferring backend for same IDs
+        const merged = new Map<string, Message>()
+        for (const m of chat.messages) merged.set(m.id, m)
+        for (const m of converted) merged.set(m.id, m)
+        return { ...chat, messages: Array.from(merged.values()) }
+      })
+    )
+  }, [])
+
   const openArtifactPanel = useCallback(() => {
     setIsArtifactPanelOpen(true)
     setActiveArtifactId(null)
@@ -181,13 +240,15 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     addArtifact,
     deleteChat,
     togglePinChat,
+    loadChatsForWorkspace,
+    loadMessagesForChat,
     isArtifactPanelOpen,
     activeArtifactId,
     openArtifactPanel,
     openArtifact,
     closeArtifactPanel,
     getArtifactsForChat,
-  }), [sortedChats, getChat, createChat, addMessage, addArtifact, deleteChat, togglePinChat, isArtifactPanelOpen, activeArtifactId, openArtifactPanel, openArtifact, closeArtifactPanel, getArtifactsForChat])
+  }), [sortedChats, getChat, createChat, addMessage, addArtifact, deleteChat, togglePinChat, loadChatsForWorkspace, loadMessagesForChat, isArtifactPanelOpen, activeArtifactId, openArtifactPanel, openArtifact, closeArtifactPanel, getArtifactsForChat])
 
   return (
     <ChatContext.Provider value={value}>
