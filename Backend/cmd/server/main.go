@@ -13,9 +13,13 @@ import (
 	"github.com/CodewithMubasher/NightCode/backend/internal/provider"
 	"github.com/CodewithMubasher/NightCode/backend/internal/store"
 	"github.com/CodewithMubasher/NightCode/backend/internal/tools"
+	"github.com/joho/godotenv"
 )
 
 func main() {
+	// Load .env file if present (no error if missing)
+	_ = godotenv.Load()
+
 	port := os.Getenv("NIGHTCODE_PORT")
 	if port == "" {
 		port = "3001"
@@ -75,6 +79,36 @@ func main() {
 			h.SetProvider(p)
 			h.SetDefaultProviderInfo("groq", groqModelOr(model))
 			log.Printf("using groq provider (model=%s)", groqModelOr(model))
+		}
+	case "opencode-zen":
+		apiKey := os.Getenv("OPENCODE_API_KEY")
+		model := os.Getenv("OPENCODE_MODEL")
+		baseURL := os.Getenv("OPENCODE_BASE_URL")
+		if apiKey == "" {
+			log.Println("WARNING: OPENCODE_API_KEY not set; falling back to echo agent")
+		} else {
+			p, err := provider.NewOpenCodeProvider(context.Background(), apiKey, model, baseURL)
+			if err != nil {
+				log.Fatalf("failed to create opencode provider: %v", err)
+			}
+			h.SetProvider(p)
+			h.SetDefaultProviderInfo("opencode-zen", opencodeModelOr(model))
+			log.Printf("using opencode-zen provider (model=%s)", opencodeModelOr(model))
+		}
+	case "openrouter":
+		apiKey := os.Getenv("OPENROUTER_API_KEY")
+		model := os.Getenv("OPENROUTER_MODEL")
+		baseURL := os.Getenv("OPENROUTER_BASE_URL")
+		if apiKey == "" {
+			log.Println("WARNING: OPENROUTER_API_KEY not set; falling back to echo agent")
+		} else {
+			p, err := provider.NewOpenRouterProvider(context.Background(), apiKey, model, baseURL)
+			if err != nil {
+				log.Fatalf("failed to create openrouter provider: %v", err)
+			}
+			h.SetProvider(p)
+			h.SetDefaultProviderInfo("openrouter", openrouterModelOr(model))
+			log.Printf("using openrouter provider (model=%s)", openrouterModelOr(model))
 		}
 	default:
 		log.Println("using echo agent (NIGHTCODE_PROVIDER=echo)")
@@ -217,6 +251,20 @@ func modelOr(model string) string {
 func groqModelOr(model string) string {
 	if model == "" {
 		return "openai/gpt-oss-20b"
+	}
+	return model
+}
+
+func opencodeModelOr(model string) string {
+	if model == "" {
+		return "mimo-v2.5-free"
+	}
+	return model
+}
+
+func openrouterModelOr(model string) string {
+	if model == "" {
+		return "google/gemma-4-31b-it:free"
 	}
 	return model
 }

@@ -13,6 +13,8 @@ const options = [
 const PROVIDER_LABELS: Record<string, string> = {
   gemini: "Google",
   groq: "Groq",
+  "opencode-zen": "Opencode Zen",
+  openrouter: "OpenRouter",
 }
 
 const ACCEPTED_EXTENSIONS = new Set([
@@ -227,10 +229,10 @@ export function PromptInput({ onSend, onCancel, isInChat = false, isGenerating =
             <ChevronDown className={`size-3.5 transition-transform duration-200 ${modelOpen ? "rotate-180" : ""}`} />
           </button>
           {modelOpen && (
-            <div className="absolute bottom-full right-0 mb-1 w-56 rounded-xl border border-white/10 bg-neutral-900 shadow-lg overflow-hidden z-50 max-h-80 overflow-y-auto">
+            <div className="absolute bottom-full right-0 mb-1 w-50 rounded-xl border border-white/10 bg-neutral-900 shadow-lg overflow-hidden z-50 max-h-65 overflow-y-auto scrollbar-hide">
               {models.length === 0 && (
                 <div className="px-3 py-2 text-xs text-white/40">
-                  No models available — set GEMINI_API_KEY or GROQ_API_KEY on the backend.
+                  No models available — check backend API keys.
                 </div>
               )}
               {Object.entries(modelsByProvider).map(([provider, providerModels]) => (

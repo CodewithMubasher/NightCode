@@ -80,10 +80,16 @@ func (t *WriteFileTool) Execute(ctx context.Context, input json.RawMessage, ws *
 	}
 	resultBytes, _ := json.Marshal(out)
 
+	artifactType := "code"
+	lang := langFromExt(in.Path)
+	if lang == "markdown" {
+		artifactType = "document"
+	}
+
 	artifact := &ArtifactRef{
 		Name:         in.Path,
-		ArtifactType: "code",
-		Language:     langFromExt(in.Path),
+		ArtifactType: artifactType,
+		Language:     lang,
 		Content:      in.Content,
 	}
 

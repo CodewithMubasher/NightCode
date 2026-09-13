@@ -36,7 +36,7 @@ export interface Workspace {
 }
 
 export interface ModelOption {
-  provider: string // "gemini" | "groq"
+  provider: string // "gemini" | "groq" | "opencode-zen" | "openrouter"
   id: string
   label: string
   default: boolean

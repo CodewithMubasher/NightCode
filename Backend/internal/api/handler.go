@@ -101,6 +101,18 @@ func (h *Handler) resolveProvider(ctx context.Context, providerName, modelName s
 			return nil, fmt.Errorf("GROQ_API_KEY not set")
 		}
 		p, err = provider.NewGroqProvider(ctx, apiKey, modelName, os.Getenv("GROQ_BASE_URL"))
+	case "opencode-zen":
+		apiKey := os.Getenv("OPENCODE_API_KEY")
+		if apiKey == "" {
+			return nil, fmt.Errorf("OPENCODE_API_KEY not set")
+		}
+		p, err = provider.NewOpenCodeProvider(ctx, apiKey, modelName, os.Getenv("OPENCODE_BASE_URL"))
+	case "openrouter":
+		apiKey := os.Getenv("OPENROUTER_API_KEY")
+		if apiKey == "" {
+			return nil, fmt.Errorf("OPENROUTER_API_KEY not set")
+		}
+		p, err = provider.NewOpenRouterProvider(ctx, apiKey, modelName, os.Getenv("OPENROUTER_BASE_URL"))
 	default:
 		return nil, fmt.Errorf("unknown provider: %s", providerName)
 	}
@@ -122,7 +134,7 @@ func (h *Handler) SetWorkspacesRoot(dir string) {
 
 type sendMessageRequest struct {
 	Message  string `json:"message"`
-	Provider string `json:"provider,omitempty"` // e.g. "gemini" | "groq"; empty = server default
+	Provider string `json:"provider,omitempty"` // "gemini" | "groq" | "opencode-zen" | "openrouter"; empty = server default
 	Model    string `json:"model,omitempty"`    // e.g. "gemini-2.5-flash" | "llama-3.3-70b-versatile"
 }
 
