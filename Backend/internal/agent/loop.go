@@ -224,15 +224,10 @@ func (l *Loop) Run(ctx context.Context, ws *tools.Workspace, chatID string, user
 		messages = appendMessagesWithToolResults(messages, toolCalls, results)
 	}
 
-	// Iteration cap hit
+	// Iteration cap hit — work was done, just can't continue further.
 	finalize()
-	events <- types.RuntimeEvent{
-		Type:      "turn.error",
-		ID:        evtID(),
-		Timestamp: now(),
-		Error:     fmt.Sprintf("max iterations (%d) exceeded", maxIterations),
-		Code:      "max_iterations_exceeded",
-	}
+	emitDone(events, evtID, "", now)
+	events <- types.RuntimeEvent{Type: "turn.completed", ID: evtID(), Timestamp: now()}
 }
 
 func (l *Loop) executeTools(
