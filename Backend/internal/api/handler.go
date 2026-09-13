@@ -108,11 +108,11 @@ func (h *Handler) resolveProvider(ctx context.Context, providerName, modelName s
 		}
 		p, err = provider.NewOpenCodeProvider(ctx, apiKey, modelName, os.Getenv("OPENCODE_BASE_URL"))
 	case "openrouter":
-		apiKey := os.Getenv("OPENROUTER_API_KEY")
-		if apiKey == "" {
+		keys := collectOpenRouterKeys()
+		if len(keys) == 0 {
 			return nil, fmt.Errorf("OPENROUTER_API_KEY not set")
 		}
-		p, err = provider.NewOpenRouterProvider(ctx, apiKey, modelName, os.Getenv("OPENROUTER_BASE_URL"))
+		p, err = provider.NewOpenRouterProvider(ctx, keys, modelName, os.Getenv("OPENROUTER_BASE_URL"))
 	default:
 		return nil, fmt.Errorf("unknown provider: %s", providerName)
 	}
@@ -125,6 +125,21 @@ func (h *Handler) resolveProvider(ctx context.Context, providerName, modelName s
 	h.providerCacheMu.Unlock()
 
 	return p, nil
+}
+
+// collectOpenRouterKeys gathers all OPENROUTER_API_KEY, OPENROUTER_API_KEY_2, etc.
+func collectOpenRouterKeys() []string {
+	var keys []string
+	if k := os.Getenv("OPENROUTER_API_KEY"); k != "" {
+		keys = append(keys, k)
+	}
+	if k := os.Getenv("OPENROUTER_API_KEY_2"); k != "" {
+		keys = append(keys, k)
+	}
+	if k := os.Getenv("OPENROUTER_API_KEY_3"); k != "" {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // SetWorkspacesRoot sets the base directory for workspace folders.

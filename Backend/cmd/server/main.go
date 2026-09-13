@@ -96,19 +96,28 @@ func main() {
 			log.Printf("using opencode-zen provider (model=%s)", opencodeModelOr(model))
 		}
 	case "openrouter":
-		apiKey := os.Getenv("OPENROUTER_API_KEY")
 		model := os.Getenv("OPENROUTER_MODEL")
 		baseURL := os.Getenv("OPENROUTER_BASE_URL")
-		if apiKey == "" {
+		var keys []string
+		if k := os.Getenv("OPENROUTER_API_KEY"); k != "" {
+			keys = append(keys, k)
+		}
+		if k := os.Getenv("OPENROUTER_API_KEY_2"); k != "" {
+			keys = append(keys, k)
+		}
+		if k := os.Getenv("OPENROUTER_API_KEY_3"); k != "" {
+			keys = append(keys, k)
+		}
+		if len(keys) == 0 {
 			log.Println("WARNING: OPENROUTER_API_KEY not set; falling back to echo agent")
 		} else {
-			p, err := provider.NewOpenRouterProvider(context.Background(), apiKey, model, baseURL)
+			p, err := provider.NewOpenRouterProvider(context.Background(), keys, model, baseURL)
 			if err != nil {
 				log.Fatalf("failed to create openrouter provider: %v", err)
 			}
 			h.SetProvider(p)
 			h.SetDefaultProviderInfo("openrouter", openrouterModelOr(model))
-			log.Printf("using openrouter provider (model=%s)", openrouterModelOr(model))
+			log.Printf("using openrouter provider (model=%s, keys=%d)", openrouterModelOr(model), len(keys))
 		}
 	default:
 		log.Println("using echo agent (NIGHTCODE_PROVIDER=echo)")

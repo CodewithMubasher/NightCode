@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
@@ -21,13 +22,23 @@ const (
 
 // OpenRouterProvider implements Provider using Eino's OpenAI-compatible
 // ChatModel adapter pointed at OpenRouter's OpenAI-compatible endpoint.
+// Supports multiple API keys with automatic rotation on rate limits.
 type OpenRouterProvider struct {
-	cm    *einoopenai.ChatModel
-	model string
+	mu        sync.Mutex
+	keys      []string
+	keyIndex  int
+	model     string
+	baseURL   string
+	cm        *einoopenai.ChatModel
 }
 
 // NewOpenRouterProvider builds an OpenRouter-backed provider.
-func NewOpenRouterProvider(ctx context.Context, apiKey, model, baseURL string) (*OpenRouterProvider, error) {
+// apiKeys is a list of API keys; the first is used initially, others are
+// fallbacks tried automatically on rate-limit (429) errors.
+func NewOpenRouterProvider(ctx context.Context, apiKeys []string, model, baseURL string) (*OpenRouterProvider, error) {
+	if len(apiKeys) == 0 {
+		return nil, fmt.Errorf("openrouter: at least one API key required")
+	}
 	if model == "" {
 		model = openrouterDefaultModel
 	}
@@ -35,18 +46,27 @@ func NewOpenRouterProvider(ctx context.Context, apiKey, model, baseURL string) (
 		baseURL = openrouterDefaultBaseURL
 	}
 
-	cm, err := einoopenai.NewChatModel(ctx, &einoopenai.ChatModelConfig{
-		APIKey:  apiKey,
-		Model:   model,
-		BaseURL: baseURL,
-	})
+	cm, err := buildOpenRouterModel(ctx, apiKeys[0], model, baseURL)
 	if err != nil {
 		return nil, fmt.Errorf("openrouter chat model: %w", err)
 	}
 
-	log.Printf("openrouter provider initialized (model=%s, baseURL=%s)", model, baseURL)
+	log.Printf("openrouter provider initialized (model=%s, baseURL=%s, keys=%d)", model, baseURL, len(apiKeys))
 
-	return &OpenRouterProvider{cm: cm, model: model}, nil
+	return &OpenRouterProvider{
+		keys:    apiKeys,
+		model:   model,
+		baseURL: baseURL,
+		cm:      cm,
+	}, nil
+}
+
+func buildOpenRouterModel(ctx context.Context, apiKey, model, baseURL string) (*einoopenai.ChatModel, error) {
+	return einoopenai.NewChatModel(ctx, &einoopenai.ChatModelConfig{
+		APIKey:  apiKey,
+		Model:   model,
+		BaseURL: baseURL,
+	})
 }
 
 func (p *OpenRouterProvider) StreamChat(ctx context.Context, req ChatRequest) (<-chan ChatEvent, error) {
@@ -72,6 +92,27 @@ func (p *OpenRouterProvider) streamWithRetry(ctx context.Context, req ChatReques
 			return
 		}
 
+		// Rate limit: rotate to next API key before retrying
+		if perr.Kind == ErrorKindRateLimit {
+			if p.rotateKey() {
+				log.Printf("openrouter: rate limited, rotated to next API key (key %d/%d)", p.keyIndex+1, len(p.keys))
+				events <- ChatEvent{
+					Type:       ChatEventRetry,
+					Err:        perr.Err,
+					Attempt:    attempt + 1,
+					MaxAttempt: maxRetryAttempts,
+					RetryAfter: delay,
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(delay):
+				}
+				delay *= 2
+				continue
+			}
+		}
+
 		if !perr.Retryable || attempt >= maxRetryAttempts-1 {
 			events <- ChatEvent{Type: ChatEventError, Err: perr}
 			return
@@ -92,6 +133,27 @@ func (p *OpenRouterProvider) streamWithRetry(ctx context.Context, req ChatReques
 		}
 		delay *= 2
 	}
+}
+
+// rotateKey switches to the next API key and rebuilds the chat model.
+// Returns false if there are no more keys to try.
+func (p *OpenRouterProvider) rotateKey() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	nextIndex := p.keyIndex + 1
+	if nextIndex >= len(p.keys) {
+		return false
+	}
+
+	p.keyIndex = nextIndex
+	cm, err := buildOpenRouterModel(context.Background(), p.keys[nextIndex], p.model, p.baseURL)
+	if err != nil {
+		log.Printf("openrouter: failed to rebuild model with key %d: %v", nextIndex+1, err)
+		return false
+	}
+	p.cm = cm
+	return true
 }
 
 func (p *OpenRouterProvider) streamOnce(ctx context.Context, req ChatRequest, events chan<- ChatEvent) *ProviderError {
@@ -197,7 +259,8 @@ func classifyOpenRouterError(err error) *ProviderError {
 		strings.Contains(lower, "invalid api key") || strings.Contains(lower, "invalid_api_key") ||
 		strings.Contains(lower, "403") || strings.Contains(lower, "forbidden"):
 		return &ProviderError{Kind: ErrorKindAuth, Retryable: false, Err: err}
-	case strings.Contains(lower, "429") || strings.Contains(lower, "rate limit") || strings.Contains(lower, "rate_limit"):
+	case strings.Contains(lower, "429") || strings.Contains(lower, "rate limit") || strings.Contains(lower, "rate_limit") ||
+		strings.Contains(lower, "too many requests"):
 		return &ProviderError{Kind: ErrorKindRateLimit, Retryable: true, Err: err}
 	case strings.Contains(lower, "500") || strings.Contains(lower, "502") ||
 		strings.Contains(lower, "503") || strings.Contains(lower, "504") ||
