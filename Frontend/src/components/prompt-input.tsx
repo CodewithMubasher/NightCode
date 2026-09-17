@@ -15,7 +15,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   groq: "Groq",
   "opencode-zen": "Opencode Zen",
   openrouter: "OpenRouter",
-  web2api: "DeepSeek Web",
+  calabrass: "Calabrass",
 }
 
 const ACCEPTED_EXTENSIONS = new Set([

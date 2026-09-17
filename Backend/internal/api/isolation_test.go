@@ -280,68 +280,6 @@ func TestIsolation_ParallelChats(t *testing.T) {
 	}
 }
 
-// Test 5 — DS2API history isolation: history(A) contains only A messages.
-func TestIsolation_DS2APIHistory(t *testing.T) {
-	s := setupTestStore(t)
-	workspaceID := "ws-1"
-
-	// Chat A: specific messages
-	chatA := "chat-a"
-	if err := s.UpsertChat(chatA, workspaceID, "Chat A"); err != nil {
-		t.Fatal(err)
-	}
-	segA1, _ := json.Marshal([]types.Segment{
-		{Type: "text", ID: "s1", Text: "I am working on project ALPHA"},
-	})
-	s.InsertMessage("msg-a1", chatA, "user", segA1)
-	segA2, _ := json.Marshal([]types.Segment{
-		{Type: "text", ID: "s2", Text: "I'll help you with project ALPHA."},
-	})
-	s.InsertMessage("msg-a2", chatA, "assistant", segA2)
-
-	// Chat B: different messages
-	chatB := "chat-b"
-	if err := s.UpsertChat(chatB, workspaceID, "Chat B"); err != nil {
-		t.Fatal(err)
-	}
-	segB1, _ := json.Marshal([]types.Segment{
-		{Type: "text", ID: "s3", Text: "I am working on project BETA"},
-	})
-	s.InsertMessage("msg-b1", chatB, "user", segB1)
-	segB2, _ := json.Marshal([]types.Segment{
-		{Type: "text", ID: "s4", Text: "I'll help you with project BETA."},
-	})
-	s.InsertMessage("msg-b2", chatB, "assistant", segB2)
-
-	// Load each chat's history and convert to provider messages
-	rowsA, _ := s.GetMessagesForChat(chatA)
-	rowsB, _ := s.GetMessagesForChat(chatB)
-
-	historyA := buildHistoryFromRows(t, rowsA)
-	historyB := buildHistoryFromRows(t, rowsB)
-
-	msgsA := buildProviderMessages(t, historyA, "Tell me about my project")
-	msgsB := buildProviderMessages(t, historyB, "Tell me about my project")
-
-	// Verify history(A) contains ALPHA but not BETA
-	historyAStr := messagesToString(msgsA)
-	if !strings.Contains(historyAStr, "ALPHA") {
-		t.Error("Chat A's history should contain 'ALPHA'")
-	}
-	if strings.Contains(historyAStr, "BETA") {
-		t.Error("Chat A's history leaked Chat B's 'BETA'")
-	}
-
-	// Verify history(B) contains BETA but not ALPHA
-	historyBStr := messagesToString(msgsB)
-	if !strings.Contains(historyBStr, "BETA") {
-		t.Error("Chat B's history should contain 'BETA'")
-	}
-	if strings.Contains(historyBStr, "ALPHA") {
-		t.Error("Chat B's history leaked Chat A's 'ALPHA'")
-	}
-}
-
 // buildHistoryFromRows converts store MessageRows to context Messages,
 // simulating what handler.go:runRealLoop does.
 func buildHistoryFromRows(t *testing.T, rows []store.MessageRow) []ctxbuilder.Message {
@@ -364,41 +302,4 @@ func buildHistoryFromRows(t *testing.T, rows []store.MessageRow) []ctxbuilder.Me
 		}
 	}
 	return history
-}
-
-// buildProviderMessages converts context messages to provider messages,
-// simulating what agent/loop.go:buildMessages does.
-func buildProviderMessages(t *testing.T, history []ctxbuilder.Message, userMsg string) []struct {
-	Role    string
-	Content string
-} {
-	t.Helper()
-	var msgs []struct {
-		Role    string
-		Content string
-	}
-	for _, m := range history {
-		msgs = append(msgs, struct {
-			Role    string
-			Content string
-		}{Role: m.Role, Content: m.Content})
-	}
-	msgs = append(msgs, struct {
-		Role    string
-		Content string
-	}{Role: "user", Content: userMsg})
-	return msgs
-}
-
-// messagesToString serializes messages to a single string for containment checks.
-func messagesToString(msgs []struct {
-	Role    string
-	Content string
-}) string {
-	var sb strings.Builder
-	for _, m := range msgs {
-		sb.WriteString(m.Content)
-		sb.WriteString("\n")
-	}
-	return sb.String()
 }

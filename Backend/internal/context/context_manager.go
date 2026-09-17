@@ -8,7 +8,7 @@ import (
 
 const (
 	// DefaultContextTokens is the default context window size for models
-	// that don't specify one. 128K covers DeepSeek V3/V4, Llama 3.3, etc.
+	// that don't specify one. 128K covers Llama 3.3, Gemini Flash, etc.
 	DefaultContextTokens = 128000
 
 	// charsPerToken is a rough heuristic for English code/text. Real tokenizers

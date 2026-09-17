@@ -39,7 +39,7 @@ type ChatRequest struct {
 	SystemPrompt string
 	Messages     []Message // system + history + current turn + tool results, in order
 	Tools        []ToolSpec
-	ChatID       string // NightCode chat ID, passed to ds2api for session persistence
+	ChatID       string // NightCode chat ID
 }
 
 // ChatEventType classifies a ChatEvent.

@@ -2,13 +2,15 @@ package api
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"os"
+	"time"
 )
 
 // modelInfo describes one selectable model for the frontend's model picker.
 type modelInfo struct {
-	Provider string `json:"provider"` // "gemini" | "groq" | "opencode-zen" | "openrouter" | "web2api"
+	Provider string `json:"provider"` // "gemini" | "groq" | "opencode-zen" | "openrouter"
 	ID       string `json:"id"`       // model identifier sent back on send
 	Label    string `json:"label"`    // display name
 	Default  bool   `json:"default"`  // true for the server's startup default
@@ -66,13 +68,7 @@ var openrouterModels = []string{
 	"thinkingmachines/inkling:free",
 }
 
-var web2apiModels = []string{
-	"DeepSeekV4.1",
-	"mock-deepseek-v1",
-	"deepseek-v4-flash",
-	"deepseek-v4-pro",
-	"deepseek-v4-flash-search",
-}
+
 
 // GET /api/models
 // Returns only models for providers that actually have an API key configured
@@ -125,13 +121,14 @@ func (h *Handler) HandleListModels(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if os.Getenv("WEB2API_BASE_URL") != "" || os.Getenv("NIGHTCODE_PROVIDER") == "web2api" {
-		for _, id := range web2apiModels {
+	// Calabrass: local server, no API key needed. Fetch models dynamically.
+	if calabrassModels := calabrassModels(); len(calabrassModels) > 0 {
+		for _, id := range calabrassModels {
 			out = append(out, modelInfo{
-				Provider: "web2api",
+				Provider: "calabrass",
 				ID:       id,
 				Label:    labelForModel(id),
-				Default:  h.providerName == "web2api" && h.modelName == id,
+				Default:  h.providerName == "calabrass" && h.modelName == id,
 			})
 		}
 	}
@@ -141,6 +138,43 @@ func (h *Handler) HandleListModels(w http.ResponseWriter, r *http.Request) {
 		out = []modelInfo{}
 	}
 	json.NewEncoder(w).Encode(out)
+}
+
+// calabrassModels fetches available models from the local Calabrass server
+// at http://127.0.0.1:8081/v1/models. Returns empty list if unreachable.
+func calabrassModels() []string {
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get("http://127.0.0.1:8081/v1/models")
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil
+	}
+
+	var result struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil
+	}
+
+	var models []string
+	for _, m := range result.Data {
+		if m.ID != "" {
+			models = append(models, m.ID)
+		}
+	}
+	return models
 }
 
 // labelForModel turns a raw model ID into a friendlier display label.
@@ -171,11 +205,6 @@ func labelForModel(id string) string {
 		"poolside/laguna-s-2.1:free":             "Laguna S 2.1",
 		"cohere/north-mini-code:free":            "North Mini Code",
 		"thinkingmachines/inkling:free":          "Inkling",
-		"DeepSeekV4.1":                          "DeepSeek V4.1 (Web)",
-		"mock-deepseek-v1":                      "Mock DeepSeek (Test)",
-		"deepseek-v4-flash":                     "DeepSeek V4 Flash (ds2api)",
-		"deepseek-v4-pro":                       "DeepSeek V4 Pro (ds2api)",
-		"deepseek-v4-flash-search":              "DeepSeek V4 Flash Search (ds2api)",
 	}
 	if l, ok := labels[id]; ok {
 		return l

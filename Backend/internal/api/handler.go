@@ -113,8 +113,8 @@ func (h *Handler) resolveProvider(ctx context.Context, providerName, modelName s
 			return nil, fmt.Errorf("OPENROUTER_API_KEY not set")
 		}
 		p, err = provider.NewOpenRouterProvider(ctx, keys, modelName, os.Getenv("OPENROUTER_BASE_URL"))
-	case "web2api":
-		p, err = provider.NewWeb2APIProvider(ctx, os.Getenv("WEB2API_API_KEY"), modelName, os.Getenv("WEB2API_BASE_URL"))
+	case "calabrass":
+		p, err = provider.NewCalabrassProvider(ctx, modelName, os.Getenv("CALABRASS_BASE_URL"))
 	default:
 		return nil, fmt.Errorf("unknown provider: %s", providerName)
 	}
@@ -151,7 +151,7 @@ func (h *Handler) SetWorkspacesRoot(dir string) {
 
 type sendMessageRequest struct {
 	Message  string `json:"message"`
-	Provider string `json:"provider,omitempty"` // "gemini" | "groq" | "opencode-zen" | "openrouter" | "web2api"; empty = server default
+	Provider string `json:"provider,omitempty"` // "gemini" | "groq" | "opencode-zen" | "openrouter" | "calabrass"; empty = server default
 	Model    string `json:"model,omitempty"`    // e.g. "gemini-2.5-flash" | "llama-3.3-70b-versatile"
 }
 

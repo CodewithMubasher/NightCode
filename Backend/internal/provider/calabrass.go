@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net/http"
 	"strings"
 	"time"
 
@@ -16,74 +15,42 @@ import (
 )
 
 const (
-	web2apiDefaultModel   = "DeepSeekV4.1"
-	web2apiDefaultBaseURL = "http://127.0.0.1:8080/v1"
+	calabrassDefaultModel   = "gemini-3.6-flash"
+	calabrassDefaultBaseURL = "http://127.0.0.1:8081/v1"
 )
 
-// chatIDKey is the context key for passing the NightCode chat ID to the
-// HTTP transport, which adds it as X-NightCode-Chat-ID header.
-type chatIDKey struct{}
-
-// ChatIDFromContext extracts the chat ID from context.
-func ChatIDFromContext(ctx context.Context) string {
-	if v, ok := ctx.Value(chatIDKey{}).(string); ok {
-		return v
-	}
-	return ""
-}
-
-// chatIDTransport is a custom RoundTripper that injects the X-NightCode-Chat-ID
-// header from the context into every HTTP request.
-type chatIDTransport struct {
-	base http.RoundTripper
-}
-
-func (t *chatIDTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if chatID := ChatIDFromContext(req.Context()); chatID != "" {
-		req.Header.Set("X-NightCode-Chat-ID", chatID)
-	}
-	return t.base.RoundTrip(req)
-}
-
-// Web2APIProvider implements Provider using Eino's OpenAI-compatible ChatModel
-// adapter pointed at a local Web2API server (e.g. deepseek-tui). The Web2API
-// server handles all the DeepSeek Web browser automation, tool call parsing,
-// and session management. NightCode just sees a standard OpenAI-compatible API.
-type Web2APIProvider struct {
+// CalabrassProvider implements Provider using Eino's OpenAI-compatible ChatModel
+// adapter pointed at a local Calabrass server.
+type CalabrassProvider struct {
 	cm    *einoopenai.ChatModel
 	model string
 }
 
-// NewWeb2APIProvider builds a Web2API-backed provider.
-func NewWeb2APIProvider(ctx context.Context, apiKey, model, baseURL string) (*Web2APIProvider, error) {
+// NewCalabrassProvider builds a Calabrass-backed provider. Calabrass exposes
+// an OpenAI-compatible API with no authentication required.
+func NewCalabrassProvider(ctx context.Context, model, baseURL string) (*CalabrassProvider, error) {
 	if model == "" {
-		model = web2apiDefaultModel
+		model = calabrassDefaultModel
 	}
 	if baseURL == "" {
-		baseURL = web2apiDefaultBaseURL
-	}
-
-	// Use a custom transport that injects X-NightCode-Chat-ID header per request.
-	httpClient := &http.Client{
-		Transport: &chatIDTransport{base: http.DefaultTransport},
+		baseURL = calabrassDefaultBaseURL
 	}
 
 	cm, err := einoopenai.NewChatModel(ctx, &einoopenai.ChatModelConfig{
-		APIKey:     apiKey,
-		Model:      model,
-		BaseURL:    baseURL,
-		HTTPClient: httpClient,
+		APIKey:  "no-key",
+		Model:   model,
+		BaseURL: baseURL,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("web2api chat model: %w", err)
+		return nil, fmt.Errorf("calabrass chat model: %w", err)
 	}
 
-	log.Printf("web2api provider initialized (model=%s, baseURL=%s)", model, baseURL)
+	log.Printf("calabrass provider initialized (model=%s, baseURL=%s)", model, baseURL)
 
-	return &Web2APIProvider{cm: cm, model: model}, nil
+	return &CalabrassProvider{cm: cm, model: model}, nil
 }
 
-func (p *Web2APIProvider) StreamChat(ctx context.Context, req ChatRequest) (<-chan ChatEvent, error) {
+func (p *CalabrassProvider) StreamChat(ctx context.Context, req ChatRequest) (<-chan ChatEvent, error) {
 	events := make(chan ChatEvent, 8)
 
 	go func() {
@@ -94,7 +61,7 @@ func (p *Web2APIProvider) StreamChat(ctx context.Context, req ChatRequest) (<-ch
 	return events, nil
 }
 
-func (p *Web2APIProvider) streamWithRetry(ctx context.Context, req ChatRequest, events chan<- ChatEvent) {
+func (p *CalabrassProvider) streamWithRetry(ctx context.Context, req ChatRequest, events chan<- ChatEvent) {
 	delay := initialRetryDelay
 	for attempt := 0; ; attempt++ {
 		if err := ctx.Err(); err != nil {
@@ -111,7 +78,7 @@ func (p *Web2APIProvider) streamWithRetry(ctx context.Context, req ChatRequest, 
 			return
 		}
 
-		log.Printf("web2api provider: retryable error (attempt %d/%d): %v", attempt+1, maxRetryAttempts, perr.Err)
+		log.Printf("calabrass provider: retryable error (attempt %d/%d): %v", attempt+1, maxRetryAttempts, perr.Err)
 		events <- ChatEvent{
 			Type:       ChatEventRetry,
 			Err:        perr.Err,
@@ -128,14 +95,9 @@ func (p *Web2APIProvider) streamWithRetry(ctx context.Context, req ChatRequest, 
 	}
 }
 
-func (p *Web2APIProvider) streamOnce(ctx context.Context, req ChatRequest, events chan<- ChatEvent) *ProviderError {
-	messages := convertWeb2APIMessages(req)
-	toolInfos := convertWeb2APIToolSpecs(req.Tools)
-
-	// Inject chat ID into context so the custom transport adds the header.
-	if req.ChatID != "" {
-		ctx = context.WithValue(ctx, chatIDKey{}, req.ChatID)
-	}
+func (p *CalabrassProvider) streamOnce(ctx context.Context, req ChatRequest, events chan<- ChatEvent) *ProviderError {
+	messages := convertCalabrassMessages(req)
+	toolInfos := convertCalabrassToolSpecs(req.Tools)
 
 	var (
 		sr  *schema.StreamReader[*schema.Message]
@@ -153,7 +115,7 @@ func (p *Web2APIProvider) streamOnce(ctx context.Context, req ChatRequest, event
 	}
 
 	if err != nil {
-		return classifyWeb2APIError(err)
+		return classifyCalabrassError(err)
 	}
 	defer sr.Close()
 
@@ -167,7 +129,7 @@ func (p *Web2APIProvider) streamOnce(ctx context.Context, req ChatRequest, event
 			if ctx.Err() != nil {
 				return nil
 			}
-			return classifyWeb2APIError(err)
+			return classifyCalabrassError(err)
 		}
 
 		if msg.Content != "" {
@@ -189,7 +151,7 @@ func (p *Web2APIProvider) streamOnce(ctx context.Context, req ChatRequest, event
 	return nil
 }
 
-func convertWeb2APIMessages(req ChatRequest) []*schema.Message {
+func convertCalabrassMessages(req ChatRequest) []*schema.Message {
 	msgs := make([]*schema.Message, 0, len(req.Messages)+1)
 
 	if req.SystemPrompt != "" {
@@ -227,7 +189,7 @@ func convertWeb2APIMessages(req ChatRequest) []*schema.Message {
 	return msgs
 }
 
-func classifyWeb2APIError(err error) *ProviderError {
+func classifyCalabrassError(err error) *ProviderError {
 	msg := err.Error()
 	lower := strings.ToLower(msg)
 
@@ -236,22 +198,18 @@ func classifyWeb2APIError(err error) *ProviderError {
 		strings.Contains(lower, "invalid api key") || strings.Contains(lower, "invalid_api_key") ||
 		strings.Contains(lower, "403") || strings.Contains(lower, "forbidden"):
 		return &ProviderError{Kind: ErrorKindAuth, Retryable: false, Err: err}
-	case strings.Contains(lower, "429") || strings.Contains(lower, "rate limit") || strings.Contains(lower, "rate_limit") ||
-		strings.Contains(lower, "too many requests"):
+	case strings.Contains(lower, "429") || strings.Contains(lower, "rate limit") || strings.Contains(lower, "rate_limit"):
 		return &ProviderError{Kind: ErrorKindRateLimit, Retryable: true, Err: err}
 	case strings.Contains(lower, "500") || strings.Contains(lower, "502") ||
 		strings.Contains(lower, "503") || strings.Contains(lower, "504") ||
-		strings.Contains(lower, "timeout") || strings.Contains(lower, "timed out") ||
-		errors.Is(err, context.DeadlineExceeded):
-		return &ProviderError{Kind: ErrorKindTransient, Retryable: true, Err: err}
-	case strings.Contains(lower, "deepseek web chat error") || strings.Contains(lower, "browser"):
+		strings.Contains(lower, "timeout") || errors.Is(err, context.DeadlineExceeded):
 		return &ProviderError{Kind: ErrorKindTransient, Retryable: true, Err: err}
 	}
 
 	return &ProviderError{Kind: ErrorKindOther, Retryable: false, Err: err}
 }
 
-func convertWeb2APIToolSpecs(specs []ToolSpec) []*schema.ToolInfo {
+func convertCalabrassToolSpecs(specs []ToolSpec) []*schema.ToolInfo {
 	if len(specs) == 0 {
 		return nil
 	}
