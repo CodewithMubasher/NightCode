@@ -13,7 +13,7 @@ import {
   SidebarMenuItem,
   SidebarMenuAction,
 } from "@/components/ui/sidebar"
-import { Eclipse, Settings, CirclePlus, FolderOpen, ClockFading, Scroll, Settings2, Ellipsis, ChevronDown, Check, Pin, PinOff, Trash2 } from "lucide-react"
+import { Eclipse, Settings, CirclePlus, FolderOpen, ClockFading, Scroll, Settings2, Ellipsis, ChevronDown, Check, Pin, PinOff, Trash2, Plug } from "lucide-react"
 import {
   Avatar,
   AvatarFallback,
@@ -98,6 +98,12 @@ export function App() {
                   <SidebarMenuButton tooltip="Workspaces" onClick={() => navigate({ to: "/workspaces" })}>
                     <FolderOpen className="size-4" />
                     <span>Workspaces</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton tooltip="Connectors" onClick={() => navigate({ to: "/connectors" })}>
+                    <Plug className="size-4" />
+                    <span>Connectors</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>

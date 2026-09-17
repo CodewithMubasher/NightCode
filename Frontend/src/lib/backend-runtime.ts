@@ -245,3 +245,74 @@ export async function fetchMessages(chatId: string): Promise<MessageRow[]> {
     return []
   }
 }
+
+// --- Connector (MCP) API ---
+
+export interface Connector {
+  id: string
+  name: string
+  transport: string
+  command: string
+  args: string
+  enabled: boolean
+  created_at: string
+}
+
+export async function fetchConnectors(): Promise<Connector[]> {
+  const url = `${API_BASE}/api/connectors`
+  try {
+    const response = await fetch(url)
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+    }
+    return await response.json()
+  } catch (e) {
+    console.warn("Failed to fetch connectors:", e)
+    return []
+  }
+}
+
+export async function createConnector(name: string, command: string): Promise<string | null> {
+  const url = `${API_BASE}/api/connectors`
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, command }),
+    })
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+    }
+    const data = await response.json()
+    return data.id
+  } catch (e) {
+    console.warn("Failed to create connector:", e)
+    return null
+  }
+}
+
+export async function deleteConnector(connectorId: string): Promise<boolean> {
+  const url = `${API_BASE}/api/connectors/${connectorId}`
+  try {
+    const response = await fetch(url, { method: "DELETE" })
+    return response.ok
+  } catch (e) {
+    console.warn("Failed to delete connector:", e)
+    return false
+  }
+}
+
+export async function toggleConnector(connectorId: string, enabled: boolean): Promise<boolean> {
+  const url = `${API_BASE}/api/connectors/${connectorId}/toggle`
+  try {
+    const response = await fetch(url, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    })
+    return response.ok
+  } catch (e) {
+    console.warn("Failed to toggle connector:", e)
+    return false
+  }
+}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -35,6 +36,7 @@ type WorkspaceRow struct {
 
 type Store struct {
 	db *sql.DB
+	mu sync.Mutex // serializes writes to prevent SQLITE_BUSY
 }
 
 func New(dbPath string) (*Store, error) {
@@ -130,6 +132,21 @@ func migrate(db *sql.DB) error {
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 		);
 	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS connectors (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			transport TEXT NOT NULL DEFAULT 'stdio',
+			command TEXT NOT NULL,
+			args TEXT NOT NULL DEFAULT '[]',
+			enabled INTEGER NOT NULL DEFAULT 1,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		);
+	`)
 	return err
 }
 
@@ -153,6 +170,8 @@ func (s *Store) UpsertChat(id, workspaceID, title string) error {
 
 // InsertMessage persists a message with segments JSON.
 func (s *Store) InsertMessage(id, chatID, role string, segments json.RawMessage) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	_, err := s.db.Exec(`
 		INSERT INTO messages (id, chat_id, role, segments)
 		VALUES (?, ?, ?, ?)
@@ -224,6 +243,8 @@ func (s *Store) GetChat(id string) (*ChatRow, error) {
 
 // InsertToolCall persists a single tool call audit row.
 func (s *Store) InsertToolCall(id, chatID, messageID, toolCallID, name, status, input, output, errStr string, startedAt, completedAt int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	_, err := s.db.Exec(`
 		INSERT INTO tool_calls (id, chat_id, message_id, tool_call_id, name, status, input, output, error, started_at, completed_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -236,6 +257,8 @@ func (s *Store) InsertToolCall(id, chatID, messageID, toolCallID, name, status, 
 
 // InsertArtifact persists an artifact row.
 func (s *Store) InsertArtifact(id, chatID, name, artifactType, language, content string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	_, err := s.db.Exec(`
 		INSERT INTO artifacts (id, chat_id, name, artifact_type, language, content)
 		VALUES (?, ?, ?, ?, ?, ?)
@@ -248,6 +271,8 @@ func (s *Store) InsertArtifact(id, chatID, name, artifactType, language, content
 
 // UpsertWorkspace creates or updates a workspace.
 func (s *Store) UpsertWorkspace(id, name, description string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	now := time.Now().UTC()
 	_, err := s.db.Exec(`
 		INSERT INTO workspaces (id, name, description, created_at)
@@ -295,6 +320,8 @@ func (s *Store) GetWorkspaces() ([]WorkspaceRow, error) {
 
 // DeleteWorkspace deletes a workspace.
 func (s *Store) DeleteWorkspace(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	_, err := s.db.Exec(`DELETE FROM workspaces WHERE id = ?`, id)
 	if err != nil {
 		log.Printf("delete workspace error: %v", err)
@@ -333,4 +360,98 @@ func (s *Store) GetArtifactsForChat(chatID string) ([]ArtifactRow, error) {
 		artifacts = append(artifacts, a)
 	}
 	return artifacts, rows.Err()
+}
+
+// --- Connector CRUD ---
+
+// ConnectorRow represents a stored MCP connector.
+type ConnectorRow struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Transport string    `json:"transport"`
+	Command   string    `json:"command"`
+	Args      string    `json:"args"`    // JSON array string, e.g. '["script.py"]'
+	Enabled   bool      `json:"enabled"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// InsertConnector creates a new connector row.
+func (s *Store) InsertConnector(id, name, transport, command, args string, enabled bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	enabledInt := 0
+	if enabled {
+		enabledInt = 1
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO connectors (id, name, transport, command, args, enabled, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, id, name, transport, command, args, enabledInt, time.Now().UTC())
+	if err != nil {
+		log.Printf("insert connector error: %v", err)
+	}
+	return err
+}
+
+// GetConnectors returns all connectors.
+func (s *Store) GetConnectors() ([]ConnectorRow, error) {
+	rows, err := s.db.Query(
+		`SELECT id, name, transport, command, args, enabled, created_at FROM connectors ORDER BY created_at DESC`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var connectors []ConnectorRow
+	for rows.Next() {
+		var c ConnectorRow
+		var enabledInt int
+		if err := rows.Scan(&c.ID, &c.Name, &c.Transport, &c.Command, &c.Args, &enabledInt, &c.CreatedAt); err != nil {
+			return nil, err
+		}
+		c.Enabled = enabledInt == 1
+		connectors = append(connectors, c)
+	}
+	return connectors, rows.Err()
+}
+
+// GetConnector returns a single connector by ID.
+func (s *Store) GetConnector(id string) (*ConnectorRow, error) {
+	var c ConnectorRow
+	var enabledInt int
+	err := s.db.QueryRow(
+		`SELECT id, name, transport, command, args, enabled, created_at FROM connectors WHERE id = ?`, id,
+	).Scan(&c.ID, &c.Name, &c.Transport, &c.Command, &c.Args, &enabledInt, &c.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	c.Enabled = enabledInt == 1
+	return &c, nil
+}
+
+// UpdateConnectorEnabled toggles the enabled state of a connector.
+func (s *Store) UpdateConnectorEnabled(id string, enabled bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	enabledInt := 0
+	if enabled {
+		enabledInt = 1
+	}
+	_, err := s.db.Exec(`UPDATE connectors SET enabled = ? WHERE id = ?`, enabledInt, id)
+	if err != nil {
+		log.Printf("update connector error: %v", err)
+	}
+	return err
+}
+
+// DeleteConnector deletes a connector.
+func (s *Store) DeleteConnector(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`DELETE FROM connectors WHERE id = ?`, id)
+	if err != nil {
+		log.Printf("delete connector error: %v", err)
+	}
+	return err
 }

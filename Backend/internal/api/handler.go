@@ -13,6 +13,7 @@ import (
 
 	"github.com/CodewithMubasher/NightCode/backend/internal/agent"
 	ctxbuilder "github.com/CodewithMubasher/NightCode/backend/internal/context"
+	"github.com/CodewithMubasher/NightCode/backend/internal/mcp"
 	"github.com/CodewithMubasher/NightCode/backend/internal/provider"
 	"github.com/CodewithMubasher/NightCode/backend/internal/store"
 	"github.com/CodewithMubasher/NightCode/backend/internal/tools"
@@ -40,6 +41,9 @@ type Handler struct {
 	// single message.
 	providerCacheMu sync.Mutex
 	providerCache    map[string]provider.Provider
+
+	// mcpManager manages MCP server connections and their tools.
+	mcpManager *tools.MCPManager
 }
 
 func NewHandler(s *store.Store) *Handler {
@@ -49,6 +53,7 @@ func NewHandler(s *store.Store) *Handler {
 		registry:       tools.NewRegistry(),
 		workspacesRoot: os.Getenv("NIGHTCODE_WORKSPACES_ROOT"),
 		providerCache:  make(map[string]provider.Provider),
+		mcpManager:     tools.NewMCPManager(),
 	}
 }
 
@@ -153,6 +158,83 @@ func collectOpenRouterKeys() []string {
 // SetWorkspacesRoot sets the base directory for workspace folders.
 func (h *Handler) SetWorkspacesRoot(dir string) {
 	h.workspacesRoot = dir
+}
+
+// loadMCPConnectors loads enabled connectors from the store, starts MCP clients,
+// and registers their tools in the registry. It skips connectors that are
+// already connected. Uses a background context so the request context
+// cancellation doesn't kill the MCP handshake.
+func (h *Handler) loadMCPConnectors() {
+	connectors, err := h.store.GetConnectors()
+	if err != nil {
+		log.Printf("load connectors error: %v", err)
+		return
+	}
+
+	for _, c := range connectors {
+		if !c.Enabled {
+			continue
+		}
+
+		// Skip if already connected.
+		if _, ok := h.mcpManager.GetClient(c.ID); ok {
+			continue
+		}
+
+		// Parse args from JSON array string.
+		var args []string
+		if c.Args != "" && c.Args != "[]" {
+			_ = json.Unmarshal([]byte(c.Args), &args)
+		}
+
+		// Use a background context with timeout so the MCP handshake
+		// isn't killed by the request context cancellation.
+		mcpCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+
+		// Start MCP client.
+		client, err := mcp.NewClient(mcpCtx, c.Command, args, nil)
+		if err != nil {
+			cancel()
+			log.Printf("mcp connect error for %s: %v", c.Name, err)
+			continue
+		}
+
+		// Discover tools.
+		toolsList, err := client.ListTools(mcpCtx)
+		cancel()
+		if err != nil {
+			log.Printf("mcp list tools error for %s: %v", c.Name, err)
+			_ = client.Close()
+			continue
+		}
+
+		h.mcpManager.RegisterClient(c.ID, client)
+
+		// Register each MCP tool in the registry.
+		for _, toolDef := range toolsList {
+			adapter := mcp.NewMCPToolAdapter(toolDef, client, c.ID)
+			h.registry.Register(adapter)
+			log.Printf("registered mcp tool: %s (connector=%s)", adapter.Name(), c.Name)
+		}
+	}
+}
+
+// StartMCPConnectors loads MCP connectors in the background at startup.
+// It runs in a goroutine so it doesn't block the server from starting.
+// Retries failed connections periodically.
+func (h *Handler) StartMCPConnectors() {
+	go func() {
+		// Initial load after a short delay to let the server start.
+		time.Sleep(2 * time.Second)
+		h.loadMCPConnectors()
+
+		// Retry every 30 seconds for any failed connectors.
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			h.loadMCPConnectors()
+		}
+	}()
 }
 
 type sendMessageRequest struct {

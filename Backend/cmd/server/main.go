@@ -44,6 +44,9 @@ func main() {
 	h := api.NewHandler(s)
 	registry := tools.NewRegistry()
 
+	// Start loading MCP connectors in the background.
+	h.StartMCPConnectors()
+
 	// Provider selection: NIGHTCODE_PROVIDER=echo|gemini|groq (default gemini)
 	providerMode := os.Getenv("NIGHTCODE_PROVIDER")
 	if providerMode == "" {
@@ -175,6 +178,12 @@ func main() {
 	mux.HandleFunc("GET /api/workspaces/{workspaceId}/chats", h.HandleListChats)
 	mux.HandleFunc("GET /api/workspaces/{workspaceId}/chats/{chatId}/messages", h.HandleListMessages)
 	mux.HandleFunc("GET /api/workspaces/{workspaceId}/chats/{chatId}/artifacts", h.HandleListArtifacts)
+
+	// Connector endpoints
+	mux.HandleFunc("GET /api/connectors", h.HandleListConnectors)
+	mux.HandleFunc("POST /api/connectors", h.HandleCreateConnector)
+	mux.HandleFunc("DELETE /api/connectors/{connectorId}", h.HandleDeleteConnector)
+	mux.HandleFunc("PATCH /api/connectors/{connectorId}/toggle", h.HandleToggleConnector)
 
 	// Debug tools endpoint — gated behind NIGHTCODE_DEBUG_TOOLS=true
 	if os.Getenv("NIGHTCODE_DEBUG_TOOLS") == "true" {

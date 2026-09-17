@@ -1,5 +1,5 @@
 import type { ToolCallEntry } from "@/types/message"
-import { FileText, FilePen, FilePlus2, Terminal, Search, Globe, Wrench, Folder, GitBranch, GitCommitHorizontal, type LucideIcon } from "lucide-react"
+import { FileText, FilePen, FilePlus2, Terminal, Search, Globe, Wrench, Folder, GitBranch, GitCommitHorizontal, Plug, type LucideIcon } from "lucide-react"
 
 const hideScrollbarStyle = `
   .hide-scrollbar::-webkit-scrollbar { display: none; }
@@ -250,7 +250,58 @@ const fallbackRenderer: ToolRenderer = {
 }
 
 export function getToolRenderer(toolName: string): ToolRenderer {
+  // MCP tools use prefix "mcp_{connectorID}_{toolName}"
+  if (toolName.startsWith("mcp_")) {
+    // Extract the actual tool name (after the second underscore)
+    const parts = toolName.split("_")
+    const actualToolName = parts.length >= 3 ? parts.slice(2).join("_") : toolName
+    return {
+      icon: Plug,
+      label: actualToolName,
+      getLabel: (entry) => {
+        if (entry.status === "running") return `Running ${actualToolName}`
+        if (entry.status === "completed") return mcpVerb(actualToolName)
+        return actualToolName
+      },
+      renderDetail: (entry) => {
+        if (!entry.input && !entry.output) return null
+        return (
+          <div className="mt-2 text-xs">
+            {entry.input && (
+              <pre className="rounded-lg bg-white/5 border border-white/10 p-3 overflow-x-auto hide-scrollbar text-white/70 font-mono text-[11px] leading-4 max-h-48 overflow-y-auto">
+                {typeof entry.input === "string" ? entry.input : JSON.stringify(entry.input, null, 2)}
+              </pre>
+            )}
+            {entry.output && (
+              <pre className="mt-1 rounded-lg bg-white/5 border border-white/10 p-3 overflow-x-auto hide-scrollbar text-white/60 font-mono text-[11px] leading-4 max-h-48 overflow-y-auto">
+                {typeof entry.output === "string" ? entry.output : JSON.stringify(entry.output, null, 2)}
+              </pre>
+            )}
+          </div>
+        )
+      },
+    }
+  }
   return toolRenderers[toolName] ?? fallbackRenderer
+}
+
+// mcpVerb maps MCP tool names to user-friendly headings.
+function mcpVerb(toolName: string): string {
+  const map: Record<string, string> = {
+    open_app: "Opened app",
+    open_url: "Opened URL",
+    open_file: "Opened file",
+    type_text: "Typed text",
+    scroll: "Scrolled",
+    screenshot: "Took screenshot",
+    create_file: "Created file",
+    create_folder: "Created folder",
+    run_command: "Ran command",
+    google_search: "Searched Google",
+    youtube_search: "Searched YouTube",
+    lock_screen: "Locked screen",
+  }
+  return map[toolName] ?? `Ran ${toolName}`
 }
 
 // summaryPhraseForGroup returns the short phrase for a single tool name given
@@ -278,6 +329,13 @@ function summaryPhraseForGroup(name: string, count: number): string {
     case "git_diff":
       return count === 1 ? "Git diff" : `Git diff (${count})`
     default: {
+      // MCP tools: extract the actual tool name for display
+      if (name.startsWith("mcp_")) {
+        const parts = name.split("_")
+        const actualName = parts.length >= 3 ? parts.slice(2).join("_") : name
+        const verb = mcpVerb(actualName)
+        return count > 1 ? `${verb} (${count})` : verb
+      }
       const label = getToolRenderer(name).label
       return count > 1 ? `${label} (${count})` : label
     }

@@ -4,6 +4,7 @@ import { Home } from "@/pages/home"
 import { Workspaces } from "@/pages/workspaces"
 import { WorkspaceView } from "@/pages/workspace-view"
 import { Settings } from "@/pages/settings"
+import { Connectors } from "@/pages/connectors"
 import { App } from "@/App"
 
 const rootRoute = createRootRoute({
@@ -40,13 +41,19 @@ const workspaceRoute = createRoute({
   },
 })
 
+const connectorsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/connectors",
+  component: Connectors,
+})
+
 const settingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/settings",
   component: Settings,
 })
 
-const routeTree = rootRoute.addChildren([indexRoute, chatRoute, workspacesRoute, workspaceRoute, settingsRoute])
+const routeTree = rootRoute.addChildren([indexRoute, chatRoute, workspacesRoute, workspaceRoute, connectorsRoute, settingsRoute])
 
 export const router = createRouter({
   routeTree,

@@ -96,6 +96,18 @@ export function PromptInput({ onSend, onCancel, isInChat = false, isGenerating =
     fetchModels().then((list) => {
       if (cancelled) return
       setModels(list)
+      // Restore previously selected model from localStorage.
+      const saved = localStorage.getItem("nightcode-selected-model")
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved) as ModelOption
+          const match = list.find((m) => m.provider === parsed.provider && m.id === parsed.id)
+          if (match) {
+            setSelectedModel(match)
+            return
+          }
+        } catch { /* ignore */ }
+      }
       const def = list.find((m) => m.default) ?? list[0] ?? null
       setSelectedModel((prev) => prev ?? def)
     })
@@ -247,6 +259,7 @@ export function PromptInput({ onSend, onCancel, isInChat = false, isGenerating =
                       key={`${model.provider}:${model.id}`}
                       onClick={() => {
                         setSelectedModel(model)
+                        localStorage.setItem("nightcode-selected-model", JSON.stringify(model))
                         setModelOpen(false)
                       }}
                       className={`flex w-full items-center gap-2 px-3 py-1.5 text-xs text-white hover:bg-white/10 cursor-pointer ${selectedModel?.provider === model.provider && selectedModel?.id === model.id ? "bg-white/5" : ""}`}
