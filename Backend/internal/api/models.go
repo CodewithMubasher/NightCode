@@ -133,6 +133,18 @@ func (h *Handler) HandleListModels(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Cloudflare Workers AI: curated list of popular models.
+	if os.Getenv("CLOUDFLARE_API_TOKEN") != "" {
+		for _, id := range cloudflareModels {
+			out = append(out, modelInfo{
+				Provider: "cloudflare",
+				ID:       id,
+				Label:    labelForModel(id),
+				Default:  h.providerName == "cloudflare" && h.modelName == id,
+			})
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	if out == nil {
 		out = []modelInfo{}
@@ -177,6 +189,23 @@ func calabrassModels() []string {
 	return models
 }
 
+// cloudflareModels returns popular Cloudflare Workers AI models.
+// The /ai/models/search endpoint returns internal UUIDs, so we use a curated list.
+var cloudflareModels = []string{
+	"@cf/openai/gpt-oss-20b",
+	"@cf/openai/gpt-oss-120b",
+	"@cf/meta/llama-3.1-8b-instruct",
+	"@cf/meta/llama-3.1-70b-instruct",
+	"@cf/meta/llama-3.3-70b-instruct",
+	"@cf/mistralai/mistral-small-3.1-24b-instruct",
+	"@cf/qwen/qwen2.5-coder-32b-instruct",
+	"@cf/qwen/qwen3-32b",
+	"@cf/meta/llama-3.2-3b-instruct",
+	"@cf/meta/llama-3.2-11b-vision-instruct",
+	"@cf/moonshotai/kimi-k2.6",
+	"@cf/google/gemma-3-12b-it",
+}
+
 // labelForModel turns a raw model ID into a friendlier display label.
 func labelForModel(id string) string {
 	labels := map[string]string{
@@ -205,6 +234,18 @@ func labelForModel(id string) string {
 		"poolside/laguna-s-2.1:free":             "Laguna S 2.1",
 		"cohere/north-mini-code:free":            "North Mini Code",
 		"thinkingmachines/inkling:free":          "Inkling",
+		"@cf/openai/gpt-oss-20b":                "GPT-OSS-20B",
+		"@cf/openai/gpt-oss-120b":               "GPT-OSS-120B",
+		"@cf/meta/llama-3.1-8b-instruct":        "Llama-3.1-8B",
+		"@cf/meta/llama-3.1-70b-instruct":       "Llama-3.1-70B",
+		"@cf/meta/llama-3.3-70b-instruct":       "Llama-3.3-70B",
+		"@cf/mistralai/mistral-small-3.1-24b-instruct": "Mistral-3.1-24B",
+		"@cf/qwen/qwen2.5-coder-32b-instruct":  "Qwen2.5-Coder-32B",
+		"@cf/qwen/qwen3-32b":                    "Qwen3-32B",
+		"@cf/meta/llama-3.2-3b-instruct":        "Llama-3.2-3B",
+		"@cf/meta/llama-3.2-11b-vision-instruct": "Llama-3.2-11B-Vision",
+		"@cf/moonshotai/kimi-k2.6":              "Kimi-K2.6",
+		"@cf/google/gemma-3-12b-it":             "Gemma-3-12B",
 	}
 	if l, ok := labels[id]; ok {
 		return l

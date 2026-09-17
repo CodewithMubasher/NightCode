@@ -129,6 +129,21 @@ func main() {
 		h.SetProvider(p)
 		h.SetDefaultProviderInfo("calabrass", calabrassModelOr(model))
 		log.Printf("using calabrass provider (model=%s)", calabrassModelOr(model))
+	case "cloudflare":
+		apiKey := os.Getenv("CLOUDFLARE_API_TOKEN")
+		model := os.Getenv("CLOUDFLARE_MODEL")
+		baseURL := os.Getenv("CLOUDFLARE_BASE_URL")
+		if apiKey == "" {
+			log.Println("WARNING: CLOUDFLARE_API_TOKEN not set; falling back to echo agent")
+		} else {
+			p, err := provider.NewCloudflareProvider(context.Background(), apiKey, model, baseURL)
+			if err != nil {
+				log.Fatalf("failed to create cloudflare provider: %v", err)
+			}
+			h.SetProvider(p)
+			h.SetDefaultProviderInfo("cloudflare", cloudflareModelOr(model))
+			log.Printf("using cloudflare provider (model=%s)", cloudflareModelOr(model))
+		}
 	default:
 		log.Println("using echo agent (NIGHTCODE_PROVIDER=echo)")
 	}
@@ -291,6 +306,13 @@ func openrouterModelOr(model string) string {
 func calabrassModelOr(model string) string {
 	if model == "" {
 		return "gemini-3.6-flash"
+	}
+	return model
+}
+
+func cloudflareModelOr(model string) string {
+	if model == "" {
+		return "@cf/openai/gpt-oss-20b"
 	}
 	return model
 }

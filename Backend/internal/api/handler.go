@@ -115,6 +115,12 @@ func (h *Handler) resolveProvider(ctx context.Context, providerName, modelName s
 		p, err = provider.NewOpenRouterProvider(ctx, keys, modelName, os.Getenv("OPENROUTER_BASE_URL"))
 	case "calabrass":
 		p, err = provider.NewCalabrassProvider(ctx, modelName, os.Getenv("CALABRASS_BASE_URL"))
+	case "cloudflare":
+		apiKey := os.Getenv("CLOUDFLARE_API_TOKEN")
+		if apiKey == "" {
+			return nil, fmt.Errorf("CLOUDFLARE_API_TOKEN not set")
+		}
+		p, err = provider.NewCloudflareProvider(ctx, apiKey, modelName, os.Getenv("CLOUDFLARE_BASE_URL"))
 	default:
 		return nil, fmt.Errorf("unknown provider: %s", providerName)
 	}
@@ -151,7 +157,7 @@ func (h *Handler) SetWorkspacesRoot(dir string) {
 
 type sendMessageRequest struct {
 	Message  string `json:"message"`
-	Provider string `json:"provider,omitempty"` // "gemini" | "groq" | "opencode-zen" | "openrouter" | "calabrass"; empty = server default
+	Provider string `json:"provider,omitempty"` // "gemini" | "groq" | "opencode-zen" | "openrouter" | "calabrass" | "cloudflare"; empty = server default
 	Model    string `json:"model,omitempty"`    // e.g. "gemini-2.5-flash" | "llama-3.3-70b-versatile"
 }
 

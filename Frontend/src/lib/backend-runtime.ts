@@ -36,7 +36,7 @@ export interface Workspace {
 }
 
 export interface ModelOption {
-  provider: string // "gemini" | "groq" | "opencode-zen" | "openrouter"
+  provider: string // "gemini" | "groq" | "opencode-zen" | "openrouter" | "calabrass" | "cloudflare"
   id: string
   label: string
   default: boolean
