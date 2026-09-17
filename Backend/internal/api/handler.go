@@ -211,10 +211,24 @@ func (h *Handler) loadMCPConnectors() {
 		h.mcpManager.RegisterClient(c.ID, client)
 
 		// Register each MCP tool in the registry.
+		var youtubeSearchTool, openURLTool tools.Tool
 		for _, toolDef := range toolsList {
 			adapter := mcp.NewMCPToolAdapter(toolDef, client, c.ID)
 			h.registry.Register(adapter)
 			log.Printf("registered mcp tool: %s (connector=%s)", adapter.Name(), c.Name)
+			if toolDef.Name == "youtube_search" {
+				youtubeSearchTool = adapter
+			}
+			if toolDef.Name == "open_url" {
+				openURLTool = adapter
+			}
+		}
+
+		// Wrap youtube_search with auto-open behavior.
+		if youtubeSearchTool != nil && openURLTool != nil {
+			wrapper := mcp.NewAutoOpenWrapper(youtubeSearchTool, openURLTool)
+			h.registry.Register(wrapper)
+			log.Printf("auto-open enabled for youtube_search (connector=%s)", c.Name)
 		}
 	}
 }
