@@ -145,14 +145,14 @@ func (h *Handler) HandleListModels(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// AshnaAI: OpenAI-compatible provider.
-	if os.Getenv("ASHNAAI_API_KEY") != "" {
-		for _, id := range ashnaaiModels {
+	// AshnaAI: OpenAI-compatible provider. Fetch models dynamically.
+	if ashnaModels := ashnaaiModels(); len(ashnaModels) > 0 {
+		for _, m := range ashnaModels {
 			out = append(out, modelInfo{
 				Provider: "ashnaai",
-				ID:       id,
-				Label:    labelForModel(id),
-				Default:  h.providerName == "ashnaai" && h.modelName == id,
+				ID:       m.id,
+				Label:    m.display,
+				Default:  h.providerName == "ashnaai" && h.modelName == m.id,
 			})
 		}
 	}
@@ -218,15 +218,62 @@ var cloudflareModels = []string{
 	"@cf/google/gemma-3-12b-it",
 }
 
-var ashnaaiModels = []string{
-	"ashna-x1",
-	"gpt-4o-mini",
-	"glm-5.3-flash",
-	"claude-sonnet-5",
-	"claude-opus-5",
-	"claude-fable-5",
-	"gpt-5.6-terra",
-	"kimi-k3",
+// ashnaaiModelInfo holds a model's ID and display name from the AshnaAI API.
+type ashnaaiModelInfo struct {
+	id      string
+	display string
+}
+
+// ashnaaiModels fetches available models from the AshnaAI API.
+// Returns empty list if the API key is not set or the endpoint is unreachable.
+func ashnaaiModels() []ashnaaiModelInfo {
+	apiKey := os.Getenv("ASHNAAI_API_KEY")
+	if apiKey == "" {
+		return nil
+	}
+	client := &http.Client{Timeout: 5 * time.Second}
+	req, err := http.NewRequest("GET", "https://api.ashna.ai/v1/api/models", nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil
+	}
+
+	var result struct {
+		Data []struct {
+			ID          string `json:"id"`
+			DisplayName string `json:"display_name"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil
+	}
+
+	var models []ashnaaiModelInfo
+	for _, m := range result.Data {
+		if m.ID != "" {
+			display := m.DisplayName
+			if display == "" {
+				display = m.ID
+			}
+			models = append(models, ashnaaiModelInfo{id: m.ID, display: display})
+		}
+	}
+	return models
 }
 
 // labelForModel turns a raw model ID into a friendlier display label.
@@ -269,14 +316,6 @@ func labelForModel(id string) string {
 		"@cf/meta/llama-3.2-11b-vision-instruct": "Llama-3.2-11B-Vision",
 		"@cf/moonshotai/kimi-k2.6":              "Kimi-K2.6",
 		"@cf/google/gemma-3-12b-it":             "Gemma-3-12B",
-		"ashna-x1":          "Ashna-X1",
-		"gpt-4o-mini":       "GPT-4o Mini",
-		"glm-5.3-flash":     "GLM-5.3 Flash",
-		"claude-sonnet-5":   "Claude Sonnet 5",
-		"claude-opus-5":     "Claude Opus 5",
-		"claude-fable-5":    "Claude Fable 5",
-		"gpt-5.6-terra":     "GPT-5.6 Terra",
-		"kimi-k3":           "Kimi K3",
 	}
 	if l, ok := labels[id]; ok {
 		return l
