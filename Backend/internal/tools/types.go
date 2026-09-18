@@ -15,8 +15,9 @@ type Tool interface {
 
 // ToolResult is returned by Tool.Execute on success.
 type ToolResult struct {
-	Output   json.RawMessage `json:"output"`
-	Artifact *ArtifactRef    `json:"artifact,omitempty"`
+	Output       json.RawMessage `json:"output"`
+	Artifact     *ArtifactRef    `json:"artifact,omitempty"`
+	ReversalData json.RawMessage `json:"reversalData,omitempty"`
 }
 
 // ArtifactRef signals that a tool call should create an artifact in the frontend.

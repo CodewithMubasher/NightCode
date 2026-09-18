@@ -57,6 +57,7 @@ interface ChatContextType {
   getChat: (id: string) => Chat | undefined
   createChat: (firstMessage: string, workspaceId?: string) => string
   addMessage: (chatId: string, role: "user" | "assistant", parts: MessagePart[], segments?: TurnSegment[]) => void
+  removeMessage: (chatId: string, messageId: string) => void
   addArtifact: (chatId: string, artifact: ArtifactPart) => void
   deleteChat: (chatId: string) => void
   togglePinChat: (chatId: string) => void
@@ -155,6 +156,15 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     )
   }, [])
 
+  const removeMessage = useCallback((chatId: string, messageId: string) => {
+    setChats((prev) =>
+      prev.map((chat) => {
+        if (chat.id !== chatId) return chat
+        return { ...chat, messages: chat.messages.filter((m) => m.id !== messageId) }
+      })
+    )
+  }, [])
+
   const deleteChat = useCallback((chatId: string) => {
     setChats((prev) => prev.filter((c) => c.id !== chatId))
   }, [])
@@ -237,6 +247,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     getChat,
     createChat,
     addMessage,
+    removeMessage,
     addArtifact,
     deleteChat,
     togglePinChat,
@@ -248,7 +259,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     openArtifact,
     closeArtifactPanel,
     getArtifactsForChat,
-  }), [sortedChats, getChat, createChat, addMessage, addArtifact, deleteChat, togglePinChat, loadChatsForWorkspace, loadMessagesForChat, isArtifactPanelOpen, activeArtifactId, openArtifactPanel, openArtifact, closeArtifactPanel, getArtifactsForChat])
+  }), [sortedChats, getChat, createChat, addMessage, removeMessage, addArtifact, deleteChat, togglePinChat, loadChatsForWorkspace, loadMessagesForChat, isArtifactPanelOpen, activeArtifactId, openArtifactPanel, openArtifact, closeArtifactPanel, getArtifactsForChat])
 
   return (
     <ChatContext.Provider value={value}>

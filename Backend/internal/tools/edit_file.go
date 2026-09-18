@@ -22,6 +22,12 @@ type EditFileOutput struct {
 	Diff         string `json:"diff"`
 }
 
+type EditFileReversal struct {
+	Path       string `json:"path"`
+	OldString  string `json:"oldString"`
+	NewString  string `json:"newString"`
+}
+
 type EditFileTool struct{}
 
 func (t *EditFileTool) Name() string        { return "edit_file" }
@@ -111,7 +117,11 @@ func (t *EditFileTool) Execute(ctx context.Context, input json.RawMessage, ws *W
 		Diff:         diff,
 	}
 	resultBytes, _ := json.Marshal(out)
-	return ToolResult{Output: resultBytes}, nil
+
+	reversal := EditFileReversal{Path: in.Path, OldString: in.NewString, NewString: in.OldString}
+	reversalBytes, _ := json.Marshal(reversal)
+
+	return ToolResult{Output: resultBytes, ReversalData: reversalBytes}, nil
 }
 
 func computeUnifiedDiff(path string, before, after []string) string {

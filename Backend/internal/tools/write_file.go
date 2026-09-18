@@ -19,6 +19,12 @@ type WriteFileOutput struct {
 	NewFile  bool   `json:"newFile"`
 }
 
+type WriteFileReversal struct {
+	OldContent string `json:"oldContent"`
+	NewFile    bool   `json:"newFile"`
+	Path       string `json:"path"`
+}
+
 type WriteFileTool struct{}
 
 func (t *WriteFileTool) Name() string        { return "write_file" }
@@ -49,10 +55,14 @@ func (t *WriteFileTool) Execute(ctx context.Context, input json.RawMessage, ws *
 		return ToolResult{}, err
 	}
 
-	// Check if the file already exists
+	// Check if the file already exists and read old content for reversal
 	newFile := true
+	var oldContent string
 	if info, err := os.Stat(resolved); err == nil && !info.IsDir() {
 		newFile = false
+		if data, err := os.ReadFile(resolved); err == nil {
+			oldContent = string(data)
+		}
 	}
 
 	// Verify parent directory is within sandbox
@@ -93,7 +103,10 @@ func (t *WriteFileTool) Execute(ctx context.Context, input json.RawMessage, ws *
 		Content:      in.Content,
 	}
 
-	return ToolResult{Output: resultBytes, Artifact: artifact}, nil
+	reversal := WriteFileReversal{OldContent: oldContent, NewFile: newFile, Path: in.Path}
+	reversalBytes, _ := json.Marshal(reversal)
+
+	return ToolResult{Output: resultBytes, Artifact: artifact, ReversalData: reversalBytes}, nil
 }
 
 func isWithinRoot(path, root string) bool {

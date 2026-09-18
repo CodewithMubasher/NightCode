@@ -50,12 +50,13 @@ type Segment struct {
 // ToolCallEntry tracks a single tool invocation within a tool-group segment.
 // Matches the frontend ToolCallEntry model.
 type ToolCallEntry struct {
-	ToolCallID  string          `json:"toolCallId"`
-	Name        string          `json:"name"`
-	Status      string          `json:"status"` // "running" | "completed" | "failed"
-	Input       json.RawMessage `json:"input,omitempty"`
-	Output      json.RawMessage `json:"output,omitempty"`
-	Error       string          `json:"error,omitempty"`
-	StartedAt   int64           `json:"startedAt"`
-	CompletedAt int64           `json:"completedAt,omitempty"`
+	ToolCallID   string          `json:"toolCallId"`
+	Name         string          `json:"name"`
+	Status       string          `json:"status"` // "running" | "completed" | "failed"
+	Input        json.RawMessage `json:"input,omitempty"`
+	Output       json.RawMessage `json:"output,omitempty"`
+	Error        string          `json:"error,omitempty"`
+	StartedAt    int64           `json:"startedAt"`
+	CompletedAt  int64           `json:"completedAt,omitempty"`
+	ReversalData json.RawMessage `json:"reversalData,omitempty"`
 }

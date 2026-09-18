@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/message-scroller"
 import { Eclipse, Copy, ThumbsUp, ThumbsDown, RotateCcw, FileText } from "lucide-react"
 import { emitFakeRuntime } from "@/lib/runtime"
-import { emitBackendRuntime, cancelBackendRun } from "@/lib/backend-runtime"
+import { emitBackendRuntime, cancelBackendRun, reverseMessage } from "@/lib/backend-runtime"
 import type { RuntimeEvent, ArtifactCreatedEvent } from "@/types/events"
 import type { ModelOption } from "@/lib/backend-runtime"
 import { takePendingModel } from "@/lib/pending-model"
@@ -144,7 +144,7 @@ function mergeAdjacentToolGroups(segments: TurnSegment[]): TurnSegment[] {
 }
 
 export function ChatView({ chatId }: ChatViewProps) {
-  const { getChat, addMessage, addArtifact, isArtifactPanelOpen, openArtifact, openArtifactPanel, closeArtifactPanel } = useChats()
+  const { getChat, addMessage, removeMessage, addArtifact, isArtifactPanelOpen, openArtifact, openArtifactPanel, closeArtifactPanel } = useChats()
   const chat = getChat(chatId)
 
   const [events, setEvents] = useState<RuntimeEvent[]>([])
@@ -422,6 +422,15 @@ export function ChatView({ chatId }: ChatViewProps) {
     openArtifact(artifactId)
   }, [chatId, addArtifact, openArtifact])
 
+  const handleReverse = useCallback(async (messageId: string) => {
+    if (!window.confirm("Reverse all file changes from this message? This cannot be undone.")) return
+    const workspaceId = chat?.workspaceId
+    const result = await reverseMessage(messageId, chatId, workspaceId)
+    if (result) {
+      removeMessage(chatId, messageId)
+    }
+  }, [chatId, chat?.workspaceId, removeMessage])
+
   const toggleArtifactPanel = useCallback(() => {
     if (isArtifactPanelOpen) {
       closeArtifactPanel()
@@ -541,7 +550,11 @@ export function ChatView({ chatId }: ChatViewProps) {
                             <button className="p-1.5 rounded-md text-white/40 hover:text-white/70 hover:bg-white/5 transition-colors cursor-pointer">
                               <ThumbsDown className="size-3.5" />
                             </button>
-                            <button className="p-1.5 rounded-md text-white/40 hover:text-white/70 hover:bg-white/5 transition-colors cursor-pointer">
+                            <button
+                              onClick={() => handleReverse(msg.id)}
+                              className="p-1.5 rounded-md text-white/40 hover:text-white/70 hover:bg-white/5 transition-colors cursor-pointer"
+                              title="Reverse changes"
+                            >
                               <RotateCcw className="size-3.5" />
                             </button>
                           </div>

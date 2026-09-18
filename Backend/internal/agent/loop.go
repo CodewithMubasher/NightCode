@@ -331,6 +331,7 @@ func (l *Loop) executeTools(
 
 				entry.Status = "completed"
 				entry.Output = result.Output
+				entry.ReversalData = result.ReversalData
 				mu.Lock()
 				*consecutiveFailures = 0
 				mu.Unlock()

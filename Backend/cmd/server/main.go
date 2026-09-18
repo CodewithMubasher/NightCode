@@ -179,6 +179,9 @@ func main() {
 	mux.HandleFunc("GET /api/workspaces/{workspaceId}/chats/{chatId}/messages", h.HandleListMessages)
 	mux.HandleFunc("GET /api/workspaces/{workspaceId}/chats/{chatId}/artifacts", h.HandleListArtifacts)
 
+	// Reverse endpoint — reverses all file changes from a message
+	mux.HandleFunc("POST /api/workspaces/{workspaceId}/chats/{chatId}/messages/{messageId}/reverse", h.HandleReverseMessage)
+
 	// Connector endpoints
 	mux.HandleFunc("GET /api/connectors", h.HandleListConnectors)
 	mux.HandleFunc("POST /api/connectors", h.HandleCreateConnector)

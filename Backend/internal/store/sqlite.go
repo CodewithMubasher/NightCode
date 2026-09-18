@@ -241,6 +241,31 @@ func (s *Store) GetChat(id string) (*ChatRow, error) {
 	return &c, nil
 }
 
+// GetMessage returns a single message by ID.
+func (s *Store) GetMessage(id string) (*MessageRow, error) {
+	var m MessageRow
+	var segStr string
+	err := s.db.QueryRow(
+		`SELECT id, chat_id, role, segments, created_at FROM messages WHERE id = ?`, id,
+	).Scan(&m.ID, &m.ChatID, &m.Role, &segStr, &m.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	m.Segments = json.RawMessage(segStr)
+	return &m, nil
+}
+
+// DeleteMessage deletes a message by ID.
+func (s *Store) DeleteMessage(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`DELETE FROM messages WHERE id = ?`, id)
+	if err != nil {
+		log.Printf("delete message error: %v", err)
+	}
+	return err
+}
+
 // InsertToolCall persists a single tool call audit row.
 func (s *Store) InsertToolCall(id, chatID, messageID, toolCallID, name, status, input, output, errStr string, startedAt, completedAt int64) error {
 	s.mu.Lock()

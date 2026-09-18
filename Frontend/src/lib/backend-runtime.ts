@@ -316,3 +316,28 @@ export async function toggleConnector(connectorId: string, enabled: boolean): Pr
     return false
   }
 }
+
+// --- Reverse API ---
+
+export interface ReverseSummary {
+  reversed: Array<{ toolName: string; path: string; status: string }>
+  skipped: Array<{ toolName: string; path?: string; status: string }>
+}
+
+/**
+ * Reverses all file changes from an assistant message and deletes the message.
+ */
+export async function reverseMessage(messageId: string, chatId: string, workspaceId?: string): Promise<ReverseSummary | null> {
+  const ws = workspaceId || "default"
+  const url = `${API_BASE}/api/workspaces/${ws}/chats/${chatId}/messages/${messageId}/reverse`
+  try {
+    const response = await fetch(url, { method: "POST" })
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+    }
+    return await response.json()
+  } catch (e) {
+    console.warn("Failed to reverse message:", e)
+    return null
+  }
+}
