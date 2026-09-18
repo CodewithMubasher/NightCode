@@ -24,8 +24,12 @@ const (
 	systemBudgetFraction = 0.30
 
 	// compactionThreshold is the minimum number of chars a message must have
-	// before we consider truncating it during compaction.
-	compactionThreshold = 600
+	// before we consider truncating it during compaction. 2000 chars (~500
+	// tokens) is generous enough to preserve meaningful context while still
+	// allowing budget reclamation from very large tool outputs.
+	// Cross-reference: loop.go:maxToolOutputBytes (8 KB) truncates tool
+	// output at the source, so stored tool results are already ≤ 8 KB.
+	compactionThreshold = 2000
 )
 
 // ContextBudget defines token limits for a single turn.
@@ -111,16 +115,18 @@ func (cm *ContextManager) Build(ctx context.Context, req BuildRequest) (ManagedC
 }
 
 // buildSystemPrompt assembles the system prompt (instructions + skills + file tree + git).
-// This is the same logic as the original Build(), but returns the prompt string directly.
+// If the assembled prompt exceeds systemTokenLimit(), it is truncated in priority
+// order: file tree first, then skills, then instructions. baseSystemPrompt is
+// never truncated. Warnings are emitted for any truncation.
 func (cm *ContextManager) buildSystemPrompt(ctx context.Context, req BuildRequest) (string, []string) {
 	var warnings []string
 
 	instructions, warn := buildInstructions(req.Workspace)
 	warnings = append(warnings, warn...)
 
-	prompt := baseSystemPrompt
+	base := baseSystemPrompt
 	if instructions != "" {
-		prompt += "\n\n" + instructions
+		base += "\n\n" + instructions
 	}
 
 	skills, skillWarn := buildSkillManifest(req.Workspace)
@@ -131,25 +137,74 @@ func (cm *ContextManager) buildSystemPrompt(ctx context.Context, req BuildReques
 
 	git := buildGitContext(ctx, req.Workspace)
 
-	var sb strings.Builder
-	sb.WriteString(prompt)
-
+	// Assemble sections so we can drop them in priority order if over budget.
+	type section struct {
+		name    string
+		content string
+	}
+	sections := []section{}
 	if skills != "" {
-		sb.WriteString("\n\n## Available Skills\n")
-		sb.WriteString(skills)
+		sections = append(sections, section{name: "skills", content: "\n\n## Available Skills\n" + skills})
 	}
-
 	if tree != "" {
-		sb.WriteString("\n\n## Workspace Structure\n")
-		sb.WriteString(tree)
+		sections = append(sections, section{name: "file tree", content: "\n\n## Workspace Structure\n" + tree})
 	}
-
 	if git != "" {
-		sb.WriteString("\n\n## Git Status\n")
-		sb.WriteString(git)
+		sections = append(sections, section{name: "git status", content: "\n\n## Git Status\n" + git})
 	}
 
-	return sb.String(), warnings
+	// Build full prompt and check budget.
+	sb := strings.Builder{}
+	sb.WriteString(base)
+	for _, s := range sections {
+		sb.WriteString(s.content)
+	}
+	fullPrompt := sb.String()
+
+	budget := cm.budget.systemTokenLimit()
+	promptTokens := estimateTokens(fullPrompt)
+
+	if promptTokens <= budget {
+		return fullPrompt, warnings
+	}
+
+	// Over budget — drop sections in reverse priority order:
+	// 1. file tree (least important), 2. skills, 3. instructions (most important)
+	// Never truncate baseSystemPrompt.
+	for i := len(sections) - 1; i >= 0; i-- {
+		dropped := sections[i]
+		// Remove this section and rebuild
+		newSections := make([]section, 0, len(sections)-1)
+		newSections = append(newSections, sections[:i]...)
+		newSections = append(newSections, sections[i+1:]...)
+
+		sb.Reset()
+		sb.WriteString(base)
+		for _, s := range newSections {
+			sb.WriteString(s.content)
+		}
+		candidate := sb.String()
+		candidateTokens := estimateTokens(candidate)
+
+		warnings = append(warnings, fmt.Sprintf("system prompt over budget (%d/%d tokens), dropped %s section",
+			promptTokens, budget, dropped.name))
+		sections = newSections
+		fullPrompt = candidate
+		promptTokens = candidateTokens
+
+		if promptTokens <= budget {
+			return fullPrompt, warnings
+		}
+	}
+
+	// Still over budget even after dropping all optional sections.
+	// The base prompt + instructions must be kept; emit a warning.
+	if promptTokens > budget {
+		warnings = append(warnings, fmt.Sprintf("system prompt still over budget (%d/%d tokens) after dropping optional sections; base prompt was not truncated",
+			promptTokens, budget))
+	}
+
+	return fullPrompt, warnings
 }
 
 // compactHistory windows and compacts history to fit the token budget.
@@ -222,14 +277,16 @@ func (cm *ContextManager) compactHistory(history []Message, systemPrompt string)
 }
 
 // compactMessage truncates a message's content while preserving metadata.
+// Truncation limit is 2000 chars to preserve meaningful context. Tool outputs
+// are already capped at 8 KB by loop.go:maxToolOutputBytes at the source.
 func compactMessage(m Message) Message {
 	if m.Content == "" || len(m.Content) <= compactionThreshold {
 		return m
 	}
 
-	// For tool results: keep first 500 chars + truncation notice
+	// For tool results: keep first 2000 chars + truncation notice
 	if m.Role == "tool" {
-		truncated := m.Content[:500] + "\n\n...[output truncated, original " + fmt.Sprintf("%d", len(m.Content)) + " chars]"
+		truncated := m.Content[:2000] + "\n\n...[output truncated, original " + fmt.Sprintf("%d", len(m.Content)) + " chars]"
 		return Message{
 			Role:       m.Role,
 			Content:    truncated,
@@ -238,9 +295,9 @@ func compactMessage(m Message) Message {
 		}
 	}
 
-	// For assistant text: keep first 500 chars + truncation notice
+	// For assistant text: keep first 2000 chars + truncation notice
 	if m.Role == "assistant" {
-		truncated := m.Content[:500] + "\n\n...[response truncated]"
+		truncated := m.Content[:2000] + "\n\n...[response truncated]"
 		return Message{
 			Role:      m.Role,
 			Content:   truncated,

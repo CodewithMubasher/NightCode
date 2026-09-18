@@ -2,6 +2,7 @@ package context
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -94,8 +95,8 @@ func TestContextManager_HistoryExceedsBudget(t *testing.T) {
 func TestContextManager_ToolResultCompaction(t *testing.T) {
 	ws := setupTestWorkspace(t)
 
-	// Create a tool result message with very large output
-	largeOutput := strings.Repeat("line of output\n", 500) // ~7500 chars
+	// Create a tool result message that exceeds the 2000-char compaction threshold
+	largeOutput := strings.Repeat("line of output\n", 200) // ~3000 chars, exceeds 2000
 	history := []Message{
 		{Role: "user", Content: "run something"},
 		{Role: "assistant", Content: "", ToolCalls: []ToolCallInfo{
@@ -135,6 +136,37 @@ func TestContextManager_ToolResultCompaction(t *testing.T) {
 		}
 	}
 	t.Error("expected to find a tool message")
+}
+
+// TestCompactMessage_ThresholdBelow2000 ensures messages under 2000 chars
+// are NOT compacted, preserving meaningful context.
+func TestCompactMessage_ThresholdBelow2000(t *testing.T) {
+	// 1500 chars — below threshold, should NOT be compacted
+	content := strings.Repeat("a", 1500)
+	msg := Message{Role: "tool", Content: content, ToolCallID: "c1", ToolName: "shell"}
+	compacted := compactMessage(msg)
+
+	if compacted.Content != content {
+		t.Errorf("message under 2000 chars should not be compacted, got %d chars", len(compacted.Content))
+	}
+}
+
+// TestCompactMessage_ThresholdAbove2000 ensures messages over 2000 chars
+// ARE compacted to 2000 chars.
+func TestCompactMessage_ThresholdAbove2000(t *testing.T) {
+	content := strings.Repeat("b", 3000)
+	msg := Message{Role: "tool", Content: content, ToolCallID: "c1", ToolName: "shell"}
+	compacted := compactMessage(msg)
+
+	if len(compacted.Content) >= 3000 {
+		t.Errorf("message over 2000 chars should be compacted, still %d chars", len(compacted.Content))
+	}
+	if !strings.Contains(compacted.Content, "truncated") {
+		t.Error("expected truncation notice in compacted output")
+	}
+	if !strings.Contains(compacted.Content, "3000") {
+		t.Error("expected original length in truncation notice")
+	}
 }
 
 func TestContextManager_ToolCallsPreserved(t *testing.T) {
@@ -231,6 +263,80 @@ func TestContextManager_TokenEstimation(t *testing.T) {
 				t.Errorf("estimateTokens(%q) = %d, want [%d, %d]", tt.input, tokens, tt.minTokens, tt.maxTokens)
 			}
 		})
+	}
+}
+
+func TestContextManager_SystemPromptBudget_WithinBudget(t *testing.T) {
+	ws := setupTestWorkspace(t)
+
+	// Tiny budget but no extra sections — should work fine
+	cm := NewContextManager(ContextBudget{TotalTokens: 128000})
+	result, err := cm.Build(context.Background(), BuildRequest{
+		Workspace: ws,
+		ChatID:    "test",
+		History:   nil,
+	})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	if result.SystemPrompt == "" {
+		t.Error("expected non-empty system prompt")
+	}
+	// No truncation warnings expected for a normal workspace
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "over budget") {
+			t.Errorf("unexpected budget warning: %s", w)
+		}
+	}
+}
+
+func TestContextManager_SystemPromptBudget_EnforcedWithWarning(t *testing.T) {
+	ws := setupTestWorkspace(t)
+
+	// Create a very large instructions file to blow the budget
+	instructions := strings.Repeat("# Large Instruction\n" + strings.Repeat("Details here. ", 50) + "\n", 200)
+	writeFile(t, filepath.Join(ws.Root, ".nightcode", "instructions.md"), instructions)
+
+	// Use a tiny budget so the system prompt exceeds it
+	cm := NewContextManager(ContextBudget{TotalTokens: 500})
+	result, err := cm.Build(context.Background(), BuildRequest{
+		Workspace: ws,
+		ChatID:    "test",
+		History:   nil,
+	})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	// Should have at least one "over budget" warning
+	found := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "over budget") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected an 'over budget' warning but none was emitted")
+	}
+}
+
+// TestCompactMessage_EmptyContent verifies empty content passes through.
+func TestCompactMessage_EmptyContent(t *testing.T) {
+	msg := Message{Role: "tool", Content: ""}
+	compacted := compactMessage(msg)
+	if compacted.Content != "" {
+		t.Errorf("expected empty content unchanged, got %q", compacted.Content)
+	}
+}
+
+// TestCompactMessage_UserNeverTruncated verifies user messages are never compacted.
+func TestCompactMessage_UserNeverTruncated(t *testing.T) {
+	content := strings.Repeat("u", 5000)
+	msg := Message{Role: "user", Content: content}
+	compacted := compactMessage(msg)
+	if compacted.Content != content {
+		t.Error("user messages should never be truncated")
 	}
 }
 

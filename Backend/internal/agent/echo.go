@@ -66,7 +66,7 @@ func Run(ctx context.Context, userMessage string, events chan<- types.RuntimeEve
 		time.Sleep(time.Duration(30+rand.Intn(30)) * time.Millisecond)
 	}
 
-	// __DONE__ sentinel
+	// DoneSentinel marks the end of the text stream
 	select {
 	case <-ctx.Done():
 		events <- types.RuntimeEvent{
@@ -82,7 +82,7 @@ func Run(ctx context.Context, userMessage string, events chan<- types.RuntimeEve
 		ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
 		SegmentID: segmentID,
 		Timestamp: now(),
-		Text:      "__DONE__",
+		Text:      DoneSentinel,
 	}:
 	}
 

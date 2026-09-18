@@ -22,9 +22,16 @@ const (
 	maxIterations          = 20
 	maxConsecutiveFailures = 4
 
+	// DoneSentinel is the marker text emitted to signal the end of an
+	// agent turn's text stream. The frontend watches for this to finalize
+	// the assistant segment.
+	DoneSentinel = "__DONE__"
+
 	// maxToolOutputBytes is the maximum size of a tool result that will be
 	// sent to the model. Outputs exceeding this are truncated with structured
 	// metadata so the model still knows the output existed and how large it was.
+	// Cross-reference: context_manager.go:compactionThreshold (2000 chars) is
+	// a higher-level cap applied during history windowing for context compaction.
 	maxToolOutputBytes = 8 * 1024 // 8 KB
 )
 
@@ -401,7 +408,7 @@ func (l *Loop) classifiedError(evtID func() string, segID string, now func() int
 			retryable = true
 		}
 	}
-	_ = perr
+	_ = perr // used by future structured error handling; currently only pe.Kind drives classification
 
 	msg := err.Error()
 	return types.RuntimeEvent{
@@ -505,6 +512,6 @@ func emitDone(events chan<- types.RuntimeEvent, evtID func() string, segID strin
 		ID:        evtID(),
 		SegmentID: segID,
 		Timestamp: now(),
-		Text:      "__DONE__",
+		Text:      DoneSentinel,
 	}
 }

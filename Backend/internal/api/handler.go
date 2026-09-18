@@ -296,13 +296,18 @@ func (h *Handler) HandleSendMessage(w http.ResponseWriter, r *http.Request) {
 		_ = h.store.UpsertChat(chatID, workspaceID, chat.Title)
 	}
 
-	// Persist user message
-	if err := h.store.InsertMessage(
-		uuid.New().String(),
-		chatID,
-		"user",
-		json.RawMessage("[]"),
-	); err != nil {
+	// Persist user message with actual text so history loading on future
+	// turns can extract it (extractTextFromSegments requires non-empty segments).
+	userMsgID := uuid.New().String()
+	userSegs, segErr := json.Marshal([]types.Segment{
+		{Type: "text", ID: "seg-" + userMsgID, Text: req.Message},
+	})
+	if segErr != nil {
+		log.Printf("marshal user segments error: %v", segErr)
+		http.Error(w, `{"error":"failed to persist message"}`, http.StatusInternalServerError)
+		return
+	}
+	if err := h.store.InsertMessage(userMsgID, chatID, "user", userSegs); err != nil {
 		log.Printf("insert user message error: %v", err)
 	}
 
@@ -381,7 +386,7 @@ func (h *Handler) HandleSendMessage(w http.ResponseWriter, r *http.Request) {
 		}
 		flusher.Flush()
 
-		if event.Type == "assistant.delta" && event.Text != "__DONE__" {
+		if event.Type == "assistant.delta" && event.Text != agent.DoneSentinel {
 			if event.Text == "" {
 				continue
 			}

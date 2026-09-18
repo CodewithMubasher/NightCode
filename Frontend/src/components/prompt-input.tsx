@@ -17,6 +17,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   openrouter: "OpenRouter",
   calabrass: "Calabrass",
   cloudflare: "Cloudflare",
+  ashnaai: "AshnaAI",
 }
 
 const ACCEPTED_EXTENSIONS = new Set([
