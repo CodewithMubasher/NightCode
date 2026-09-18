@@ -145,6 +145,18 @@ func (h *Handler) HandleListModels(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// AshnaAI: OpenAI-compatible provider.
+	if os.Getenv("ASHNAAI_API_KEY") != "" {
+		for _, id := range ashnaaiModels {
+			out = append(out, modelInfo{
+				Provider: "ashnaai",
+				ID:       id,
+				Label:    labelForModel(id),
+				Default:  h.providerName == "ashnaai" && h.modelName == id,
+			})
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	if out == nil {
 		out = []modelInfo{}
@@ -206,6 +218,17 @@ var cloudflareModels = []string{
 	"@cf/google/gemma-3-12b-it",
 }
 
+var ashnaaiModels = []string{
+	"ashna-x1",
+	"gpt-4o-mini",
+	"glm-5.3-flash",
+	"claude-sonnet-5",
+	"claude-opus-5",
+	"claude-fable-5",
+	"gpt-5.6-terra",
+	"kimi-k3",
+}
+
 // labelForModel turns a raw model ID into a friendlier display label.
 func labelForModel(id string) string {
 	labels := map[string]string{
@@ -246,6 +269,14 @@ func labelForModel(id string) string {
 		"@cf/meta/llama-3.2-11b-vision-instruct": "Llama-3.2-11B-Vision",
 		"@cf/moonshotai/kimi-k2.6":              "Kimi-K2.6",
 		"@cf/google/gemma-3-12b-it":             "Gemma-3-12B",
+		"ashna-x1":          "Ashna-X1",
+		"gpt-4o-mini":       "GPT-4o Mini",
+		"glm-5.3-flash":     "GLM-5.3 Flash",
+		"claude-sonnet-5":   "Claude Sonnet 5",
+		"claude-opus-5":     "Claude Opus 5",
+		"claude-fable-5":    "Claude Fable 5",
+		"gpt-5.6-terra":     "GPT-5.6 Terra",
+		"kimi-k3":           "Kimi K3",
 	}
 	if l, ok := labels[id]; ok {
 		return l

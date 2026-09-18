@@ -126,6 +126,12 @@ func (h *Handler) resolveProvider(ctx context.Context, providerName, modelName s
 			return nil, fmt.Errorf("CLOUDFLARE_API_TOKEN not set")
 		}
 		p, err = provider.NewCloudflareProvider(ctx, apiKey, modelName, os.Getenv("CLOUDFLARE_BASE_URL"))
+	case "ashnaai":
+		apiKey := os.Getenv("ASHNAAI_API_KEY")
+		if apiKey == "" {
+			return nil, fmt.Errorf("ASHNAAI_API_KEY not set")
+		}
+		p, err = provider.NewAshnaAIProvider(ctx, apiKey, modelName, os.Getenv("ASHNAAI_BASE_URL"))
 	default:
 		return nil, fmt.Errorf("unknown provider: %s", providerName)
 	}

@@ -147,6 +147,21 @@ func main() {
 			h.SetDefaultProviderInfo("cloudflare", cloudflareModelOr(model))
 			log.Printf("using cloudflare provider (model=%s)", cloudflareModelOr(model))
 		}
+	case "ashnaai":
+		apiKey := os.Getenv("ASHNAAI_API_KEY")
+		model := os.Getenv("ASHNAAI_MODEL")
+		baseURL := os.Getenv("ASHNAAI_BASE_URL")
+		if apiKey == "" {
+			log.Println("WARNING: ASHNAAI_API_KEY not set; falling back to echo agent")
+		} else {
+			p, err := provider.NewAshnaAIProvider(context.Background(), apiKey, model, baseURL)
+			if err != nil {
+				log.Fatalf("failed to create ashnaai provider: %v", err)
+			}
+			h.SetProvider(p)
+			h.SetDefaultProviderInfo("ashnaai", ashnaaiModelOr(model))
+			log.Printf("using ashnaai provider (model=%s)", ashnaaiModelOr(model))
+		}
 	default:
 		log.Println("using echo agent (NIGHTCODE_PROVIDER=echo)")
 	}
@@ -325,6 +340,13 @@ func calabrassModelOr(model string) string {
 func cloudflareModelOr(model string) string {
 	if model == "" {
 		return "@cf/openai/gpt-oss-20b"
+	}
+	return model
+}
+
+func ashnaaiModelOr(model string) string {
+	if model == "" {
+		return "gpt-4o-mini"
 	}
 	return model
 }
