@@ -132,6 +132,12 @@ func (h *Handler) resolveProvider(ctx context.Context, providerName, modelName s
 			return nil, fmt.Errorf("ASHNAAI_API_KEY not set")
 		}
 		p, err = provider.NewAshnaAIProvider(ctx, apiKey, modelName, os.Getenv("ASHNAAI_BASE_URL"))
+	case "nightcode":
+		apiKey := os.Getenv("NIGHTCODE_LOCAL_API_KEY")
+		if apiKey == "" {
+			return nil, fmt.Errorf("NIGHTCODE_LOCAL_API_KEY not set")
+		}
+		p, err = provider.NewNightcodeProvider(ctx, apiKey, modelName, os.Getenv("NIGHTCODE_LOCAL_BASE_URL"))
 	default:
 		return nil, fmt.Errorf("unknown provider: %s", providerName)
 	}

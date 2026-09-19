@@ -157,6 +157,18 @@ func (h *Handler) HandleListModels(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Nightcode: local LLM gateway. Fetch models dynamically.
+	if nightcodeModels := nightcodeLocalModels(); len(nightcodeModels) > 0 {
+		for _, m := range nightcodeModels {
+			out = append(out, modelInfo{
+				Provider: "nightcode",
+				ID:       m.id,
+				Label:    m.display,
+				Default:  h.providerName == "nightcode" && h.modelName == m.id,
+			})
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	if out == nil {
 		out = []modelInfo{}
@@ -271,6 +283,70 @@ func ashnaaiModels() []ashnaaiModelInfo {
 				display = m.ID
 			}
 			models = append(models, ashnaaiModelInfo{id: m.ID, display: display})
+		}
+	}
+	return models
+}
+
+// nightcodeLocalModelInfo holds a model's ID and display name from the Nightcode local API.
+type nightcodeLocalModelInfo struct {
+	id      string
+	display string
+}
+
+// nightcodeLocalModels fetches available models from the local Nightcode LLM gateway.
+// Returns empty list if the endpoint is unreachable.
+func nightcodeLocalModels() []nightcodeLocalModelInfo {
+	apiKey := os.Getenv("NIGHTCODE_LOCAL_API_KEY")
+	if apiKey == "" {
+		return nil
+	}
+	baseURL := os.Getenv("NIGHTCODE_LOCAL_BASE_URL")
+	if baseURL == "" {
+		baseURL = "http://127.0.0.1:31415/v1"
+	}
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	req, err := http.NewRequest("GET", baseURL+"/models", nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil
+	}
+
+	var result struct {
+		Data []struct {
+			ID        string `json:"id"`
+			Name      string `json:"name"`
+			Available bool   `json:"available"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil
+	}
+
+	var models []nightcodeLocalModelInfo
+	for _, m := range result.Data {
+		if m.ID != "" && m.Available {
+			display := m.Name
+			if display == "" {
+				display = m.ID
+			}
+			models = append(models, nightcodeLocalModelInfo{id: m.ID, display: display})
 		}
 	}
 	return models

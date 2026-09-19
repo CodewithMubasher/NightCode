@@ -18,6 +18,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   calabrass: "Calabrass",
   cloudflare: "Cloudflare",
   ashnaai: "AshnaAI",
+  nightcode: "Nightcode",
 }
 
 const ACCEPTED_EXTENSIONS = new Set([

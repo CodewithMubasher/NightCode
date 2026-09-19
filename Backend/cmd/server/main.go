@@ -162,6 +162,21 @@ func main() {
 			h.SetDefaultProviderInfo("ashnaai", ashnaaiModelOr(model))
 			log.Printf("using ashnaai provider (model=%s)", ashnaaiModelOr(model))
 		}
+	case "nightcode":
+		apiKey := os.Getenv("NIGHTCODE_LOCAL_API_KEY")
+		model := os.Getenv("NIGHTCODE_LOCAL_MODEL")
+		baseURL := os.Getenv("NIGHTCODE_LOCAL_BASE_URL")
+		if apiKey == "" {
+			log.Println("WARNING: NIGHTCODE_LOCAL_API_KEY not set; falling back to echo agent")
+		} else {
+			p, err := provider.NewNightcodeProvider(context.Background(), apiKey, model, baseURL)
+			if err != nil {
+				log.Fatalf("failed to create nightcode provider: %v", err)
+			}
+			h.SetProvider(p)
+			h.SetDefaultProviderInfo("nightcode", nightcodeModelOr(model))
+			log.Printf("using nightcode provider (model=%s)", nightcodeModelOr(model))
+		}
 	default:
 		log.Println("using echo agent (NIGHTCODE_PROVIDER=echo)")
 	}
@@ -347,6 +362,13 @@ func cloudflareModelOr(model string) string {
 func ashnaaiModelOr(model string) string {
 	if model == "" {
 		return "gpt-4o-mini"
+	}
+	return model
+}
+
+func nightcodeModelOr(model string) string {
+	if model == "" {
+		return "gemini-3.6-flash"
 	}
 	return model
 }
