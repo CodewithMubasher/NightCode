@@ -33,7 +33,7 @@ The two communicate over HTTP and **Server-Sent Events (SSE)**, so responses and
 
 <div align="center">
 
-<img src="docs/screenshots/screenshot-1.png" alt="NightCode home page" width="100%" />
+<img src="image%20(3).png" alt="NightCode home page" width="100%" />
 <br/><sub><b>Home:</b> start a new chat and pick a model</sub>
 
 </div>
@@ -43,31 +43,31 @@ The two communicate over HTTP and **Server-Sent Events (SSE)**, so responses and
 <table>
   <tr>
     <td width="50%">
-      <img src="docs/screenshots/screenshot-2.png" alt="Chat with streaming response" />
+      <img src="image%20(4).png" alt="Chat with streaming response" />
       <br/><sub><b>Chat:</b> streaming responses with markdown and syntax highlighting</sub>
     </td>
     <td width="50%">
-      <img src="docs/screenshots/screenshot-3.png" alt="Tool execution timeline" />
+      <img src="image%20(5).png" alt="Tool execution timeline" />
       <br/><sub><b>Tool timeline:</b> watch every file read, edit and command as it happens</sub>
     </td>
   </tr>
   <tr>
     <td width="50%">
-      <img src="docs/screenshots/screenshot-4.png" alt="Artifact panel" />
+      <img src="image%20(6).png" alt="Artifact panel" />
       <br/><sub><b>Artifacts:</b> view, copy and download generated code</sub>
     </td>
     <td width="50%">
-      <img src="docs/screenshots/screenshot-5.png" alt="Workspaces page" />
+      <img src="image%20(7).png" alt="Workspaces page" />
       <br/><sub><b>Workspaces:</b> manage separate project folders</sub>
     </td>
   </tr>
   <tr>
     <td width="50%">
-      <img src="docs/screenshots/screenshot-6.png" alt="MCP connectors page" />
+      <img src="image%20(8).png" alt="MCP connectors page" />
       <br/><sub><b>Connectors:</b> add and toggle MCP tool servers</sub>
     </td>
     <td width="50%">
-      <img src="docs/screenshots/screenshot-7.png" alt="Settings page" />
+      <img src="image%20(9).png" alt="Settings page" />
       <br/><sub><b>Settings:</b> appearance and account options</sub>
     </td>
   </tr>
