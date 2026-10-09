@@ -91,11 +91,7 @@ export function TimelineNode({
         </div>
         {hasDetail && (
           <div className={`grid transition-all duration-200 ease-in-out ${isDetailExpanded ? "grid-rows-[1fr] opacity-100 mt-1" : "grid-rows-[0fr] opacity-0"}`}>
-            <div className="overflow-hidden">
-              <style>{`
-                .hide-scrollbar::-webkit-scrollbar { display: none; }
-                .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-              `}</style>
+            <div className="overflow-hidden hide-scrollbar">
               {detail}
             </div>
           </div>

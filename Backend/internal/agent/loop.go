@@ -86,10 +86,14 @@ func (l *Loop) Run(ctx context.Context, ws *tools.Workspace, chatID string, user
 	}
 
 	// Emit turn.started
-	events <- types.RuntimeEvent{
+	select {
+	case events <- types.RuntimeEvent{
 		Type:      "turn.started",
 		ID:        evtID(),
 		Timestamp: now(),
+	}:
+	case <-ctx.Done():
+		return
 	}
 
 	// Assemble provider messages: history + current user message
@@ -134,7 +138,10 @@ func (l *Loop) Run(ctx context.Context, ws *tools.Workspace, chatID string, user
 
 		eventCh, err := l.provider.StreamChat(ctx, req)
 		if err != nil {
-			events <- turnError(evtID, seg.ID, now, err, "internal_error", false)
+			select {
+			case events <- turnError(evtID, seg.ID, now, err, "internal_error", false):
+			case <-ctx.Done():
+			}
 			return
 		}
 
@@ -155,24 +162,31 @@ func (l *Loop) Run(ctx context.Context, ws *tools.Workspace, chatID string, user
 					case <-time.After(time.Duration(streamDelayMs) * time.Millisecond):
 					}
 				}
-				events <- types.RuntimeEvent{
-					Type:      "assistant.delta",
-					ID:        evtID(),
-					SegmentID: seg.ID,
-					Timestamp: now(),
-					Text:      textBuf,
-				}
+			select {
+			case events <- types.RuntimeEvent{
+				Type:      "assistant.delta",
+				ID:        evtID(),
+				SegmentID: seg.ID,
+				Timestamp: now(),
+				Text:      textBuf,
+			}:
+			case <-ctx.Done():
+				return
+			}
 
 			case provider.ChatEventToolCalls:
 				toolCalls = event.ToolCalls
 				break streamLoop
 
-			case provider.ChatEventError:
-				if ctx.Err() != nil {
-					return
-				}
-				events <- l.classifiedError(evtID, seg.ID, now, event.Err)
+		case provider.ChatEventError:
+			if ctx.Err() != nil {
 				return
+			}
+			select {
+			case events <- l.classifiedError(evtID, seg.ID, now, event.Err):
+			case <-ctx.Done():
+			}
+			return
 
 			case provider.ChatEventRetry:
 				// Non-terminal: the provider hit a retryable error (rate
@@ -182,16 +196,20 @@ func (l *Loop) Run(ctx context.Context, ws *tools.Workspace, chatID string, user
 				// previously a 45s Gemini rate-limit backoff looked
 				// identical to a hung request, and cancelling during that
 				// window discarded the turn with no visible trace.
-				events <- types.RuntimeEvent{
-					Type:      "turn.retry",
-					ID:        evtID(),
-					SegmentID: seg.ID,
-					Timestamp: now(),
-					Error:     event.Err.Error(),
-					Attempt:   event.Attempt,
-					MaxAttempt: event.MaxAttempt,
-					RetryAfterMs: event.RetryAfter.Milliseconds(),
-				}
+			select {
+			case events <- types.RuntimeEvent{
+				Type:      "turn.retry",
+				ID:        evtID(),
+				SegmentID: seg.ID,
+				Timestamp: now(),
+				Error:     event.Err.Error(),
+				Attempt:   event.Attempt,
+				MaxAttempt: event.MaxAttempt,
+				RetryAfterMs: event.RetryAfter.Milliseconds(),
+			}:
+			case <-ctx.Done():
+				return
+			}
 			}
 		}
 
@@ -201,7 +219,10 @@ func (l *Loop) Run(ctx context.Context, ws *tools.Workspace, chatID string, user
 		// tool calls, no error. Surface this as a real error instead of
 		// completing the turn as if it succeeded with an empty reply.
 		if deltaCount == 0 && len(toolCalls) == 0 {
-			events <- turnError(evtID, seg.ID, now, fmt.Errorf("model returned an empty response (no text, no tool calls)"), "empty_response", false)
+			select {
+			case events <- turnError(evtID, seg.ID, now, fmt.Errorf("model returned an empty response (no text, no tool calls)"), "empty_response", false):
+			case <-ctx.Done():
+			}
 			return
 		}
 
@@ -215,7 +236,10 @@ func (l *Loop) Run(ctx context.Context, ws *tools.Workspace, chatID string, user
 		if len(toolCalls) == 0 {
 			emitDone(events, evtID, seg.ID, now)
 			finalize()
-			events <- types.RuntimeEvent{Type: "turn.completed", ID: evtID(), Timestamp: now()}
+			select {
+			case events <- types.RuntimeEvent{Type: "turn.completed", ID: evtID(), Timestamp: now()}:
+			case <-ctx.Done():
+			}
 			return
 		}
 
@@ -225,13 +249,16 @@ func (l *Loop) Run(ctx context.Context, ws *tools.Workspace, chatID string, user
 
 		// Consecutive failure cap
 		if consecutiveFailures >= maxConsecutiveFailures {
-			events <- types.RuntimeEvent{
+			select {
+			case events <- types.RuntimeEvent{
 				Type:      "turn.error",
 				ID:        evtID(),
 				SegmentID: toolSeg.ID,
 				Timestamp: now(),
 				Error:     fmt.Sprintf("too many consecutive tool failures (%d)", consecutiveFailures),
 				Code:      "too_many_tool_failures",
+			}:
+			case <-ctx.Done():
 			}
 			return
 		}
@@ -248,7 +275,10 @@ func (l *Loop) Run(ctx context.Context, ws *tools.Workspace, chatID string, user
 	// Iteration cap hit — work was done, just can't continue further.
 	finalize()
 	emitDone(events, evtID, "", now)
-	events <- types.RuntimeEvent{Type: "turn.completed", ID: evtID(), Timestamp: now()}
+	select {
+	case events <- types.RuntimeEvent{Type: "turn.completed", ID: evtID(), Timestamp: now()}:
+	case <-ctx.Done():
+	}
 }
 
 func (l *Loop) executeTools(
@@ -267,6 +297,14 @@ func (l *Loop) executeTools(
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
+	// sendEvent sends an event, respecting context cancellation.
+	sendEvent := func(evt types.RuntimeEvent) {
+		select {
+		case events <- evt:
+		case <-ctx.Done():
+		}
+	}
+
 	for i, tc := range toolCalls {
 		wg.Add(1)
 		go func(i int, tc provider.ToolCall) {
@@ -278,7 +316,7 @@ func (l *Loop) executeTools(
 				input = json.RawMessage("{}")
 			}
 
-			events <- types.RuntimeEvent{
+			sendEvent(types.RuntimeEvent{
 				Type:       "tool.started",
 				ID:         evtID(),
 				SegmentID:  toolSeg.ID,
@@ -286,7 +324,7 @@ func (l *Loop) executeTools(
 				ToolCallID: tc.ID,
 				Name:       tc.Name,
 				Input:      input,
-			}
+			})
 
 			t, ok := l.registry[tc.Name]
 			var result tools.ToolResult
@@ -314,10 +352,12 @@ func (l *Loop) executeTools(
 				mu.Unlock()
 
 				if l.store != nil {
-					_ = l.store.InsertToolCall(uuid.New().String(), chatID, messageID, tc.ID, tc.Name, "failed", string(input), "", err.Error(), started, now())
+					if storeErr := l.store.InsertToolCall(uuid.New().String(), chatID, messageID, tc.ID, tc.Name, "failed", string(input), "", err.Error(), started, now()); storeErr != nil {
+						log.Printf("insert tool_call error: %v", storeErr)
+					}
 				}
 
-				events <- types.RuntimeEvent{
+				sendEvent(types.RuntimeEvent{
 					Type:       "tool.failed",
 					ID:         evtID(),
 					SegmentID:  toolSeg.ID,
@@ -326,12 +366,11 @@ func (l *Loop) executeTools(
 					Name:       tc.Name,
 					Error:      err.Error(),
 					Duration:   duration,
-				}
+				})
 			} else {
 				// Truncate large outputs to protect the context budget.
 				outputBytes := result.Output
-				originalBytes := len(outputBytes)
-				if originalBytes > maxToolOutputBytes {
+				if len(outputBytes) > maxToolOutputBytes {
 					outputBytes = append(outputBytes[:maxToolOutputBytes], []byte("\n\n...truncated...")...)
 				}
 				result.Output = outputBytes
@@ -344,10 +383,12 @@ func (l *Loop) executeTools(
 				mu.Unlock()
 
 				if l.store != nil {
-					_ = l.store.InsertToolCall(uuid.New().String(), chatID, messageID, tc.ID, tc.Name, "completed", string(input), string(result.Output), "", started, now())
+					if storeErr := l.store.InsertToolCall(uuid.New().String(), chatID, messageID, tc.ID, tc.Name, "completed", string(input), string(result.Output), "", started, now()); storeErr != nil {
+						log.Printf("insert tool_call error: %v", storeErr)
+					}
 				}
 
-				events <- types.RuntimeEvent{
+				sendEvent(types.RuntimeEvent{
 					Type:       "tool.completed",
 					ID:         evtID(),
 					SegmentID:  toolSeg.ID,
@@ -356,14 +397,16 @@ func (l *Loop) executeTools(
 					Name:       tc.Name,
 					Output:     result.Output,
 					Duration:   duration,
-				}
+				})
 
 				if result.Artifact != nil {
 					artifactID := fmt.Sprintf("artifact-%d", time.Now().UnixNano())
 					if l.store != nil {
-						_ = l.store.InsertArtifact(artifactID, chatID, result.Artifact.Name, result.Artifact.ArtifactType, result.Artifact.Language, result.Artifact.Content)
+						if storeErr := l.store.InsertArtifact(artifactID, chatID, result.Artifact.Name, result.Artifact.ArtifactType, result.Artifact.Language, result.Artifact.Content); storeErr != nil {
+							log.Printf("insert artifact error: %v", storeErr)
+						}
 					}
-					events <- types.RuntimeEvent{
+					sendEvent(types.RuntimeEvent{
 						Type:         "artifact.created",
 						ID:           evtID(),
 						SegmentID:    toolSeg.ID,
@@ -374,7 +417,7 @@ func (l *Loop) executeTools(
 						Content:      result.Artifact.Content,
 						ArtifactType: result.Artifact.ArtifactType,
 						Language:     result.Artifact.Language,
-					}
+					})
 				}
 			}
 
@@ -384,7 +427,19 @@ func (l *Loop) executeTools(
 		}(i, tc)
 	}
 
-	wg.Wait()
+	// Wait for all tools to complete, with a timeout to prevent indefinite blocking.
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Minute):
+		log.Printf("tool execution timed out after %s", 5*time.Minute)
+	}
+
 	return results
 }
 
@@ -393,9 +448,7 @@ func (l *Loop) classifiedError(evtID func() string, segID string, now func() int
 	code := "internal_error"
 	retryable := false
 
-	var perr *provider.ProviderError
 	if pe, ok := err.(*provider.ProviderError); ok {
-		perr = pe
 		switch pe.Kind {
 		case provider.ErrorKindAuth:
 			code = "auth_error"
@@ -408,7 +461,6 @@ func (l *Loop) classifiedError(evtID func() string, segID string, now func() int
 			retryable = true
 		}
 	}
-	_ = perr // used by future structured error handling; currently only pe.Kind drives classification
 
 	msg := err.Error()
 	return types.RuntimeEvent{

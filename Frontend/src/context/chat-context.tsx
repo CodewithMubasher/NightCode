@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useCallback, useEffect, useMemo, type ReactNode } from "react"
 import { type Chat, type Message, type MessagePart, type ArtifactPart, type TurnSegment, generateId, truncateTitle } from "@/types/message"
 import { fetchChats, fetchMessages, type ChatRow, type MessageRow } from "@/lib/backend-runtime"
+import { getFileLanguage } from "@/lib/constants"
 
 const STORAGE_KEY = "nightcode-chats"
 
@@ -117,14 +118,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           if (part.type === "attachment" && part.content) {
             const ext = part.name.split(".").pop()?.toLowerCase() || ""
             const isMd = ext === "md"
-            const languageMap: Record<string, string> = { tsx: "tsx", ts: "typescript", jsx: "jsx", js: "javascript", py: "python", md: "md", json: "json", css: "css", html: "html" }
             newArtifacts.push({
               type: "artifact",
               id: `att-${part.name}`,
               name: part.name,
               content: part.content,
               artifactType: isMd ? "document" : "code",
-              language: languageMap[ext] || ext,
+              language: getFileLanguage(part.name),
               createdAt: Date.now(),
             })
           }

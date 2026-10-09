@@ -196,7 +196,9 @@ func (h *Handler) loadMCPConnectors() {
 		// Parse args from JSON array string.
 		var args []string
 		if c.Args != "" && c.Args != "[]" {
-			_ = json.Unmarshal([]byte(c.Args), &args)
+			if err := json.Unmarshal([]byte(c.Args), &args); err != nil {
+				log.Printf("parse connector args error for %s: %v", c.Name, err)
+			}
 		}
 
 		// Use a background context with timeout so the MCP handshake
@@ -216,7 +218,9 @@ func (h *Handler) loadMCPConnectors() {
 		cancel()
 		if err != nil {
 			log.Printf("mcp list tools error for %s: %v", c.Name, err)
-			_ = client.Close()
+			if closeErr := client.Close(); closeErr != nil {
+				log.Printf("mcp client close error for %s: %v", c.Name, closeErr)
+			}
 			continue
 		}
 
@@ -299,7 +303,9 @@ func (h *Handler) HandleSendMessage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else if chat.WorkspaceID == "" && workspaceID != "" {
-		_ = h.store.UpsertChat(chatID, workspaceID, chat.Title)
+		if err := h.store.UpsertChat(chatID, workspaceID, chat.Title); err != nil {
+			log.Printf("upsert chat error: %v", err)
+		}
 	}
 
 	// Persist user message with actual text so history loading on future
@@ -346,6 +352,20 @@ func (h *Handler) HandleSendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	events := make(chan types.RuntimeEvent, 32)
+
+	// Ensure the events channel is always closed when the handler returns,
+	// so producer goroutines never block forever on send.
+	defer func() {
+		// Cancel the context first so producers stop sending.
+		cancel()
+		// Drain the events channel in a goroutine to unblock any producers
+		// that are still trying to send. The channel will be closed by the
+		// producer's defer, but we drain it here to avoid blocking.
+		go func() {
+			for range events {
+			}
+		}()
+	}()
 
 	// Resolve which provider/model to use for this request (falls back to
 	// the server default configured via NIGHTCODE_PROVIDER when the request
@@ -460,7 +480,11 @@ func (h *Handler) runRealLoop(ctx context.Context, p provider.Provider, workspac
 		log.Printf("workspace resolve error: %v", err)
 		// Last-resort fallback so tools still function even if the
 		// workspace directory genuinely can't be created (e.g. permissions).
-		ws, _ = tools.NewWorkspace(os.TempDir())
+		ws, err = tools.NewWorkspace(os.TempDir())
+		if err != nil {
+			log.Printf("FATAL: fallback workspace also failed: %v", err)
+			return
+		}
 		log.Printf("WARNING: using OS temp dir as workspace fallback for chat=%s — files created this turn will not be in a stable location", chatID)
 	}
 
@@ -694,7 +718,9 @@ func (h *Handler) HandleCreateWorkspace(w http.ResponseWriter, r *http.Request) 
 	// Also create the workspace directory
 	if h.workspacesRoot != "" {
 		workspacePath := filepath.Join(h.workspacesRoot, id)
-		_ = os.MkdirAll(workspacePath, 0o755)
+		if err := os.MkdirAll(workspacePath, 0o755); err != nil {
+			log.Printf("create workspace dir error: %v", err)
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/CodewithMubasher/NightCode/backend/internal/tools"
 	"github.com/CodewithMubasher/NightCode/backend/internal/types"
@@ -158,29 +159,13 @@ func (h *Handler) reverseEditFile(data json.RawMessage, ws *tools.Workspace) str
 	}
 
 	content := string(fileData)
-	count := 0
-	for i := 0; i < len(content); {
-		idx := indexOf(content[i:], reversal.OldString)
-		if idx < 0 {
-			break
-		}
-		count++
-		i += idx + len(reversal.OldString)
-	}
+	count := strings.Count(content, reversal.OldString)
 
 	if count == 0 {
 		// The new_string may have already been edited — try swapping
-		count2 := 0
-		for i := 0; i < len(content); {
-			idx := indexOf(content[i:], reversal.NewString)
-			if idx < 0 {
-				break
-			}
-			count2++
-			i += idx + len(reversal.NewString)
-		}
+		count2 := strings.Count(content, reversal.NewString)
 		if count2 == 1 {
-			newContent := replaceOnce(content, reversal.NewString, reversal.OldString)
+			newContent := strings.Replace(content, reversal.NewString, reversal.OldString, 1)
 			if err := os.WriteFile(resolved, []byte(newContent), 0o644); err != nil {
 				return "error"
 			}
@@ -192,26 +177,9 @@ func (h *Handler) reverseEditFile(data json.RawMessage, ws *tools.Workspace) str
 		return "error"
 	}
 
-	newContent := replaceOnce(content, reversal.OldString, reversal.NewString)
+	newContent := strings.Replace(content, reversal.OldString, reversal.NewString, 1)
 	if err := os.WriteFile(resolved, []byte(newContent), 0o644); err != nil {
 		return "error"
 	}
 	return "ok"
-}
-
-func indexOf(s, substr string) int {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return i
-		}
-	}
-	return -1
-}
-
-func replaceOnce(s, old, new string) string {
-	idx := indexOf(s, old)
-	if idx < 0 {
-		return s
-	}
-	return s[:idx] + new + s[idx+len(old):]
 }

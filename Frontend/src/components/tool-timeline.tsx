@@ -72,25 +72,6 @@ export function ToolTimeline({ isAgentStarted, isAgentCompleted, toolEvents, too
 
   return (
     <div>
-      <style>{`
-        @keyframes shimmer {
-          0% { background-position: -200% 0; }
-          100% { background-position: 200% 0; }
-        }
-        .tl-shimmer {
-          background: linear-gradient(
-            90deg,
-            rgba(255,255,255,0.5) 0%,
-            rgba(255,255,255,0.8) 50%,
-            rgba(255,255,255,0.5) 100%
-          );
-          background-size: 200% 100%;
-          -webkit-background-clip: text;
-          background-clip: text;
-          -webkit-text-fill-color: transparent;
-          animation: shimmer 1.5s ease-in-out infinite;
-        }
-      `}</style>
       <button
         onClick={toggleExpanded}
         className={`flex items-center gap-1.5 -pt-1 cursor-pointer hover:text-white/70 ${hasFailed ? "text-red-400/70" : "text-white/50"}`}

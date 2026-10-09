@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"regexp"
@@ -113,8 +114,11 @@ func (t *GrepTool) execRg(ctx context.Context, rgPath string, in GrepInput, sear
 
 	err := cmd.Run()
 	// rg returns exit code 1 when no matches found — that's not an error
-	if err != nil && err.Error() != "exit status 1" {
-		return ToolResult{}, &ToolError{Code: "search_error", Message: fmt.Sprintf("rg failed: %v — %s", err, stderr.String())}
+	if err != nil {
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
+			return ToolResult{}, &ToolError{Code: "search_error", Message: fmt.Sprintf("rg failed: %v — %s", err, stderr.String())}
+		}
 	}
 
 	var matches []GrepMatch

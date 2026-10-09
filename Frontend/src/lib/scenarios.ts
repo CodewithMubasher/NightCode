@@ -1,4 +1,4 @@
-import { type RuntimeEvent, generateEventId } from "@/types/events"
+﻿import { type RuntimeEvent, generateEventId } from "@/types/events"
 
 export type ScenarioCallbacks = {
   onEvent: (event: RuntimeEvent) => void
@@ -6,12 +6,15 @@ export type ScenarioCallbacks = {
 
 export type Scenario = (callbacks: ScenarioCallbacks) => () => void
 
+type Timer = ReturnType<typeof setTimeout>
+type CleanupFn = () => void
+
 function typeText(
   text: string,
   segmentId: string,
   onDelta: (text: string) => void,
   onDone: () => void
-): () => void {
+): CleanupFn {
   let currentIndex = 0
   let cancelled = false
   const chars = text.split("")
@@ -80,8 +83,11 @@ function emitArtifact(
 
 // Case 1: Plain text only, no tools
 export const simpleResponse: Scenario = (cb) => {
-  const timers: ReturnType<typeof setTimeout>[] = []
-  const cleanup = () => timers.forEach(clearTimeout)
+  const timers: (Timer | CleanupFn)[] = []
+  const cleanup = () => timers.forEach((t) => {
+    if (typeof t === "function") t()
+    else clearTimeout(t)
+  })
   const segId = generateEventId()
 
   timers.push(setTimeout(() => {
@@ -93,7 +99,7 @@ export const simpleResponse: Scenario = (cb) => {
         emitDone(segId, cb)
       }
     )
-    timers.push({ clearTimeout: cancelType } as unknown as ReturnType<typeof setTimeout>)
+    timers.push(cancelType)
   }, 500))
 
   return cleanup
@@ -101,8 +107,11 @@ export const simpleResponse: Scenario = (cb) => {
 
 // Streaming response (text in small chunks)
 export const streamingResponse: Scenario = (cb) => {
-  const timers: ReturnType<typeof setTimeout>[] = []
-  const cleanup = () => timers.forEach(clearTimeout)
+  const timers: (Timer | CleanupFn)[] = []
+  const cleanup = () => timers.forEach((t) => {
+    if (typeof t === "function") t()
+    else clearTimeout(t)
+  })
   const segId = generateEventId()
 
   timers.push(setTimeout(() => {
@@ -129,16 +138,16 @@ export const streamingResponse: Scenario = (cb) => {
       }
     }, 300)
 
-    timers.push({ clearTimeout: () => clearInterval(interval) } as unknown as ReturnType<typeof setTimeout>)
+    timers.push(() => clearInterval(interval))
   }, 500))
 
   return cleanup
 }
 
-// Case 2: Text → one tool call → text
+// Case 2: Text â†’ one tool call â†’ text
 export const readFile: Scenario = (cb) => {
-  const timers: ReturnType<typeof setTimeout>[] = []
-  const cleanup = () => timers.forEach(clearTimeout)
+  const timers: (Timer | CleanupFn)[] = []
+  const cleanup = () => timers.forEach((t) => { if (typeof t === "function") t(); else clearTimeout(t) })
   const textSegId = generateEventId()
   const toolSegId = generateEventId()
   const summarySegId = generateEventId()
@@ -168,10 +177,10 @@ export const readFile: Scenario = (cb) => {
   return cleanup
 }
 
-// Case 2b: Text → one edit → text
+// Case 2b: Text â†’ one edit â†’ text
 export const editFile: Scenario = (cb) => {
-  const timers: ReturnType<typeof setTimeout>[] = []
-  const cleanup = () => timers.forEach(clearTimeout)
+  const timers: (Timer | CleanupFn)[] = []
+  const cleanup = () => timers.forEach((t) => { if (typeof t === "function") t(); else clearTimeout(t) })
   const textSegId = generateEventId()
   const toolSegId = generateEventId()
   const summarySegId = generateEventId()
@@ -201,10 +210,10 @@ export const editFile: Scenario = (cb) => {
   return cleanup
 }
 
-// Case 3: Text → tool → text → tool → text (interleaved)
+// Case 3: Text â†’ tool â†’ text â†’ tool â†’ text (interleaved)
 export const interleavedTools: Scenario = (cb) => {
-  const timers: ReturnType<typeof setTimeout>[] = []
-  const cleanup = () => timers.forEach(clearTimeout)
+  const timers: (Timer | CleanupFn)[] = []
+  const cleanup = () => timers.forEach((t) => { if (typeof t === "function") t(); else clearTimeout(t) })
   const textSeg1 = generateEventId()
   const toolSeg1 = generateEventId()
   const textSeg2 = generateEventId()
@@ -250,8 +259,8 @@ export const interleavedTools: Scenario = (cb) => {
 
 // Case 4: Multiple tool calls fired in parallel within one group
 export const parallelTools: Scenario = (cb) => {
-  const timers: ReturnType<typeof setTimeout>[] = []
-  const cleanup = () => timers.forEach(clearTimeout)
+  const timers: (Timer | CleanupFn)[] = []
+  const cleanup = () => timers.forEach((t) => { if (typeof t === "function") t(); else clearTimeout(t) })
   const textSegId = generateEventId()
   const toolSegId = generateEventId()
   const summarySegId = generateEventId()
@@ -289,8 +298,8 @@ export const parallelTools: Scenario = (cb) => {
 
 // Case 5: Tool failure followed by recovery text
 export const toolFailure: Scenario = (cb) => {
-  const timers: ReturnType<typeof setTimeout>[] = []
-  const cleanup = () => timers.forEach(clearTimeout)
+  const timers: (Timer | CleanupFn)[] = []
+  const cleanup = () => timers.forEach((t) => { if (typeof t === "function") t(); else clearTimeout(t) })
   const textSeg1 = generateEventId()
   const toolSegId = generateEventId()
   const textSeg2 = generateEventId()
@@ -322,8 +331,8 @@ export const toolFailure: Scenario = (cb) => {
 
 // Case 6: Tool calls only, zero text
 export const toolOnly: Scenario = (cb) => {
-  const timers: ReturnType<typeof setTimeout>[] = []
-  const cleanup = () => timers.forEach(clearTimeout)
+  const timers: (Timer | CleanupFn)[] = []
+  const cleanup = () => timers.forEach((t) => { if (typeof t === "function") t(); else clearTimeout(t) })
   const toolSegId = generateEventId()
   const toolCallId = generateEventId()
 
@@ -342,8 +351,8 @@ export const toolOnly: Scenario = (cb) => {
 
 // Agent failure
 export const agentFailure: Scenario = (cb) => {
-  const timers: ReturnType<typeof setTimeout>[] = []
-  const cleanup = () => timers.forEach(clearTimeout)
+  const timers: (Timer | CleanupFn)[] = []
+  const cleanup = () => timers.forEach((t) => { if (typeof t === "function") t(); else clearTimeout(t) })
   const segId = generateEventId()
 
   timers.push(setTimeout(() => {
@@ -362,13 +371,16 @@ export const agentFailure: Scenario = (cb) => {
 
 // Cancellation
 export const cancellation: Scenario = (cb) => {
-  const timers: ReturnType<typeof setTimeout>[] = []
+  const timers: (Timer | CleanupFn)[] = []
   let cancelled = false
   const segId = generateEventId()
 
   const cleanup = () => {
     cancelled = true
-    timers.forEach(clearTimeout)
+    timers.forEach((t) => {
+      if (typeof t === "function") t()
+      else clearTimeout(t)
+    })
   }
 
   timers.push(setTimeout(() => {
@@ -391,7 +403,7 @@ export const cancellation: Scenario = (cb) => {
       }
     }, 50)
 
-    timers.push({ clearTimeout: () => clearInterval(interval) } as unknown as ReturnType<typeof setTimeout>)
+    timers.push(() => clearInterval(interval))
   }, 500))
 
   return cleanup
@@ -399,8 +411,8 @@ export const cancellation: Scenario = (cb) => {
 
 // Huge response
 export const hugeResponse: Scenario = (cb) => {
-  const timers: ReturnType<typeof setTimeout>[] = []
-  const cleanup = () => timers.forEach(clearTimeout)
+  const timers: (Timer | CleanupFn)[] = []
+  const cleanup = () => timers.forEach((t) => { if (typeof t === "function") t(); else clearTimeout(t) })
   const segId = generateEventId()
 
   timers.push(setTimeout(() => {
@@ -411,17 +423,17 @@ export const hugeResponse: Scenario = (cb) => {
 The project follows a clean modular structure with clear separation of concerns. The component hierarchy is well-organized, and the state management approach using React Context is appropriate for this scale.
 
 ### Strengths:
-1. **Type Safety** — TypeScript is used throughout with proper type definitions
-2. **Component Design** — Components are small, focused, and reusable
-3. **State Management** — Context API provides clean data flow without unnecessary complexity
-4. **Styling** — Tailwind CSS ensures consistent design system usage
+1. **Type Safety** â€” TypeScript is used throughout with proper type definitions
+2. **Component Design** â€” Components are small, focused, and reusable
+3. **State Management** â€” Context API provides clean data flow without unnecessary complexity
+4. **Styling** â€” Tailwind CSS ensures consistent design system usage
 
 ### Areas for Improvement:
 
-1. **Error Boundaries** — Add React Error Boundaries around critical UI sections
-2. **Loading States** — Implement skeleton loaders for better perceived performance
-3. **Accessibility** — Add ARIA labels and keyboard navigation support
-4. **Testing** — Add unit tests for utility functions and integration tests for components
+1. **Error Boundaries** â€” Add React Error Boundaries around critical UI sections
+2. **Loading States** â€” Implement skeleton loaders for better perceived performance
+3. **Accessibility** â€” Add ARIA labels and keyboard navigation support
+4. **Testing** â€” Add unit tests for utility functions and integration tests for components
 
 ### Recommendations:
 
@@ -444,10 +456,10 @@ The codebase is in good shape overall. These improvements would make it producti
   return cleanup
 }
 
-// Full workflow: text → read file → text (describe) → 3 edit files → text
+// Full workflow: text â†’ read file â†’ text (describe) â†’ 3 edit files â†’ text
 export const fullWorkflow: Scenario = (cb) => {
-  const timers: ReturnType<typeof setTimeout>[] = []
-  const cleanup = () => timers.forEach(clearTimeout)
+  const timers: (Timer | CleanupFn)[] = []
+  const cleanup = () => timers.forEach((t) => { if (typeof t === "function") t(); else clearTimeout(t) })
   const textSeg1 = generateEventId()
   const toolSeg1 = generateEventId()
   const textSeg2 = generateEventId()
@@ -556,10 +568,10 @@ export function AuthForm({ onSubmit }: Props) {
   return cleanup
 }
 
-// Ran command: text → shell command → text
+// Ran command: text â†’ shell command â†’ text
 export const ranCommand: Scenario = (cb) => {
-  const timers: ReturnType<typeof setTimeout>[] = []
-  const cleanup = () => timers.forEach(clearTimeout)
+  const timers: (Timer | CleanupFn)[] = []
+  const cleanup = () => timers.forEach((t) => { if (typeof t === "function") t(); else clearTimeout(t) })
   const textSeg1 = generateEventId()
   const toolSeg = generateEventId()
   const textSeg2 = generateEventId()
@@ -591,8 +603,8 @@ export const ranCommand: Scenario = (cb) => {
 
 // Markdown showcase: headings, lists, inline code, code blocks, bold, etc.
 export const markdownShowcase: Scenario = (cb) => {
-  const timers: ReturnType<typeof setTimeout>[] = []
-  const cleanup = () => timers.forEach(clearTimeout)
+  const timers: (Timer | CleanupFn)[] = []
+  const cleanup = () => timers.forEach((t) => { if (typeof t === "function") t(); else clearTimeout(t) })
   const segId = generateEventId()
 
   const text = `## Getting Started with React Hooks
@@ -601,10 +613,10 @@ Hooks let you use state and other React features **without writing a class**. He
 
 ### Key Hooks
 
-- \`useState\` — manages local component state
-- \`useEffect\` — handles side effects like data fetching
-- \`useContext\` — consumes context without nesting
-- \`useRef\` — accesses DOM elements or persists values
+- \`useState\` â€” manages local component state
+- \`useEffect\` â€” handles side effects like data fetching
+- \`useContext\` â€” consumes context without nesting
+- \`useRef\` â€” accesses DOM elements or persists values
 
 ### Basic Example
 
@@ -712,3 +724,4 @@ export function selectScenario(message: string): Scenario {
 
   return simpleResponse
 }
+

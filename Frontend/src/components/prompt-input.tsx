@@ -3,6 +3,7 @@ import { useState, useRef, useEffect, type KeyboardEvent } from "react"
 import { AttachmentCard } from "@/components/attachment-card"
 import type { AttachmentPart } from "@/types/message"
 import { fetchModels, type ModelOption } from "@/lib/backend-runtime"
+import { ACCEPTED_EXTENSIONS } from "@/lib/constants"
 
 const options = [
   { value: "readonly", label: "Read Only", icon: ShieldCheck },
@@ -20,13 +21,6 @@ const PROVIDER_LABELS: Record<string, string> = {
   ashnaai: "AshnaAI",
   nightcode: "Nightcode",
 }
-
-const ACCEPTED_EXTENSIONS = new Set([
-  ".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs", ".java", ".c", ".cpp",
-  ".cs", ".rb", ".php", ".swift", ".kt", ".scala", ".html", ".css", ".scss",
-  ".json", ".yaml", ".yml", ".toml", ".xml", ".sql", ".sh", ".bash", ".zsh",
-  ".md", ".txt", ".env", ".gitignore", ".dockerfile", ".vue", ".svelte",
-])
 
 const IMAGE_MIMES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml"])
 

@@ -20,6 +20,7 @@ import type { ModelOption } from "@/lib/backend-runtime"
 import { takePendingModel } from "@/lib/pending-model"
 import type { AttachmentPart, TurnSegment, ToolCallEntry } from "@/types/message"
 import { AttachmentCard, isMarkdownFile } from "@/components/attachment-card"
+import { getFileLanguage } from "@/lib/constants"
 
 interface ChatViewProps {
   chatId: string
@@ -563,11 +564,6 @@ export function ChatView({ chatId }: ChatViewProps) {
                         <div className="flex flex-col items-end gap-1">
                           <div className="flex gap-2 overflow-x-auto snap-x snap-mandatory scrollbar-none">
                             {msg.parts.filter((p): p is AttachmentPart => p.type === "attachment").map((att) => {
-                              const getFileLanguage = (n: string) => {
-                                const ext = n.split(".").pop()?.toLowerCase() || ""
-                                const map: Record<string, string> = { tsx: "tsx", ts: "typescript", jsx: "jsx", js: "javascript", py: "python", md: "md", json: "json", css: "css", html: "html" }
-                                return map[ext] || ext
-                              }
                               return (
                                 <AttachmentCard
                                   key={att.id}

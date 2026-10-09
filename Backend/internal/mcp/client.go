@@ -22,7 +22,11 @@ type Client struct {
 	reqID  atomic.Int64
 	// pending maps request IDs to response channels.
 	pending map[int]chan *JSONRPCResponse
-dead    bool
+	dead    bool
+	// cancel stops all goroutines when Close is called.
+	cancel context.CancelFunc
+	// wg tracks background goroutines for clean shutdown.
+	wg sync.WaitGroup
 }
 
 // NewClient spawns the MCP server process and performs the initialize handshake.
@@ -50,18 +54,23 @@ func NewClient(ctx context.Context, command string, args []string, env []string)
 		return nil, fmt.Errorf("start process: %w", err)
 	}
 
+	bgCtx, cancel := context.WithCancel(context.Background())
 	c := &Client{
 		cmd:     cmd,
 		stdin:   stdin,
 		stdout:  bufio.NewReader(stdoutPipe),
 		pending: make(map[int]chan *JSONRPCResponse),
+		cancel:  cancel,
 	}
 
 	// Start response reader goroutine.
-	go c.readLoop()
+	c.wg.Add(1)
+	go c.readLoop(bgCtx)
 
 	// Start stderr reader goroutine.
+	c.wg.Add(1)
 	go func() {
+		defer c.wg.Done()
 		scanner := bufio.NewScanner(stderrPipe)
 		for scanner.Scan() {
 			log.Printf("[mcp] stderr: %s", scanner.Text())
@@ -69,7 +78,9 @@ func NewClient(ctx context.Context, command string, args []string, env []string)
 	}()
 
 	// Wait for process exit in background to reap resources.
+	c.wg.Add(1)
 	go func() {
+		defer c.wg.Done()
 		if err := c.cmd.Wait(); err != nil {
 			log.Printf("[mcp] process exited: %v", err)
 		} else {
@@ -92,7 +103,9 @@ func NewClient(ctx context.Context, command string, args []string, env []string)
 
 	// Initialize handshake.
 	if err := c.initialize(ctx); err != nil {
-		_ = c.Close()
+		if closeErr := c.Close(); closeErr != nil {
+			log.Printf("close client error after failed init: %v", closeErr)
+		}
 		return nil, fmt.Errorf("initialize: %w", err)
 	}
 
@@ -133,7 +146,7 @@ func (c *Client) CallTool(ctx context.Context, name string, args json.RawMessage
 	return &result, nil
 }
 
-// Close shuts down the MCP server process.
+// Close shuts down the MCP server process and waits for all goroutines to exit.
 func (c *Client) Close() error {
 	c.mu.Lock()
 	if c.dead {
@@ -143,8 +156,16 @@ func (c *Client) Close() error {
 	c.dead = true
 	c.mu.Unlock()
 
+	// Cancel the background context to stop all goroutines.
+	c.cancel()
+
 	_ = c.stdin.Close()
-	return c.cmd.Process.Kill()
+	_ = c.cmd.Process.Kill()
+
+	// Wait for all goroutines to finish.
+	c.wg.Wait()
+
+	return nil
 }
 
 // --- internal JSON-RPC transport ---
@@ -225,8 +246,14 @@ func (c *Client) sendNotification(method string) error {
 	return err
 }
 
-func (c *Client) readLoop() {
+func (c *Client) readLoop(ctx context.Context) {
+	defer c.wg.Done()
 	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
 		line, err := c.stdout.ReadBytes('\n')
 		if err != nil {
 			if err != io.EOF {

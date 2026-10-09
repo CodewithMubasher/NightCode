@@ -156,6 +156,8 @@ func (s *Store) Close() error {
 
 // UpsertChat creates or updates a chat row.
 func (s *Store) UpsertChat(id, workspaceID, title string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	now := time.Now().UTC()
 	_, err := s.db.Exec(`
 		INSERT INTO chats (id, workspace_id, title, created_at, updated_at)
@@ -184,6 +186,8 @@ func (s *Store) InsertMessage(id, chatID, role string, segments json.RawMessage)
 
 // GetChatsForWorkspace returns all chats for a workspace.
 func (s *Store) GetChatsForWorkspace(workspaceID string) ([]ChatRow, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	rows, err := s.db.Query(
 		`SELECT id, workspace_id, title, created_at, updated_at FROM chats WHERE workspace_id = ? ORDER BY created_at DESC`,
 		workspaceID,
@@ -206,6 +210,8 @@ func (s *Store) GetChatsForWorkspace(workspaceID string) ([]ChatRow, error) {
 
 // GetMessagesForChat returns all messages for a chat.
 func (s *Store) GetMessagesForChat(chatID string) ([]MessageRow, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	rows, err := s.db.Query(
 		`SELECT id, chat_id, role, segments, created_at FROM messages WHERE chat_id = ? ORDER BY created_at ASC`,
 		chatID,
@@ -231,6 +237,8 @@ func (s *Store) GetMessagesForChat(chatID string) ([]MessageRow, error) {
 
 // GetChat returns a single chat.
 func (s *Store) GetChat(id string) (*ChatRow, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var c ChatRow
 	err := s.db.QueryRow(
 		`SELECT id, workspace_id, title, created_at, updated_at FROM chats WHERE id = ?`, id,
@@ -243,6 +251,8 @@ func (s *Store) GetChat(id string) (*ChatRow, error) {
 
 // GetMessage returns a single message by ID.
 func (s *Store) GetMessage(id string) (*MessageRow, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var m MessageRow
 	var segStr string
 	err := s.db.QueryRow(
@@ -312,6 +322,8 @@ func (s *Store) UpsertWorkspace(id, name, description string) error {
 
 // GetWorkspace returns a single workspace.
 func (s *Store) GetWorkspace(id string) (*WorkspaceRow, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var w WorkspaceRow
 	err := s.db.QueryRow(
 		`SELECT id, name, description, created_at FROM workspaces WHERE id = ?`, id,
@@ -324,6 +336,8 @@ func (s *Store) GetWorkspace(id string) (*WorkspaceRow, error) {
 
 // GetWorkspaces returns all workspaces.
 func (s *Store) GetWorkspaces() ([]WorkspaceRow, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	rows, err := s.db.Query(
 		`SELECT id, name, description, created_at FROM workspaces ORDER BY created_at DESC`,
 	)
@@ -367,6 +381,8 @@ type ArtifactRow struct {
 
 // GetArtifactsForChat returns all artifacts for a chat.
 func (s *Store) GetArtifactsForChat(chatID string) ([]ArtifactRow, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	rows, err := s.db.Query(
 		`SELECT id, chat_id, name, artifact_type, language, content, created_at FROM artifacts WHERE chat_id = ? ORDER BY created_at ASC`,
 		chatID,
@@ -420,6 +436,8 @@ func (s *Store) InsertConnector(id, name, transport, command, args string, enabl
 
 // GetConnectors returns all connectors.
 func (s *Store) GetConnectors() ([]ConnectorRow, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	rows, err := s.db.Query(
 		`SELECT id, name, transport, command, args, enabled, created_at FROM connectors ORDER BY created_at DESC`,
 	)
@@ -443,6 +461,8 @@ func (s *Store) GetConnectors() ([]ConnectorRow, error) {
 
 // GetConnector returns a single connector by ID.
 func (s *Store) GetConnector(id string) (*ConnectorRow, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var c ConnectorRow
 	var enabledInt int
 	err := s.db.QueryRow(

@@ -21,6 +21,7 @@ import {
 import { Search, Plus, X, GitBranch } from "lucide-react"
 import type { AttachmentPart } from "@/types/message"
 import { fetchWorkspaces, fetchArtifacts } from "@/lib/backend-runtime"
+import { ACCEPTED_EXTENSIONS } from "@/lib/constants"
 
 interface Workspace {
   id: string
@@ -78,8 +79,6 @@ function saveContextFiles(workspaceId: string, files: ContextFile[]) {
 function getFileExtensionBadge(name: string): string {
   return name.split(".").pop()?.toUpperCase() ?? "FILE"
 }
-
-const ACCEPTED_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".py", ".json", ".css", ".html", ".md", ".yaml", ".yml", ".xml", ".sql", ".sh", ".rb", ".go", ".rs", ".java", ".c", ".cpp", ".cs", ".vue", ".svelte", ".txt"])
 
 function isAcceptedFile(file: File): boolean {
   const ext = "." + file.name.split(".").pop()?.toLowerCase()

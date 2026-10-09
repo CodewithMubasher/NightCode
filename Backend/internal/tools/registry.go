@@ -1,5 +1,7 @@
 package tools
 
+import "log"
+
 // ToolRegistry maps tool names to their implementations.
 type ToolRegistry map[string]Tool
 
@@ -23,20 +25,9 @@ func (r ToolRegistry) Register(t Tool) {
 	r[t.Name()] = t
 }
 
-// Unregister removes a tool from the registry by name.
-func (r ToolRegistry) Unregister(name string) {
-	delete(r, name)
-}
-
 // Get retrieves a tool by name. Returns nil if not found.
 func (r ToolRegistry) Get(name string) Tool {
 	return r[name]
-}
-
-// Has checks if a tool is registered by name.
-func (r ToolRegistry) Has(name string) bool {
-	_, ok := r[name]
-	return ok
 }
 
 // Names returns all registered tool names in sorted order.
@@ -79,7 +70,9 @@ func (m *MCPManager) RegisterClient(connectorID string, client MCPClientInterfac
 // UnregisterClient removes an MCP client by connector ID.
 func (m *MCPManager) UnregisterClient(connectorID string) {
 	if client, ok := m.clients[connectorID]; ok {
-		_ = client.Close()
+		if err := client.Close(); err != nil {
+			log.Printf("close MCP client error for %s: %v", connectorID, err)
+		}
 		delete(m.clients, connectorID)
 	}
 }
@@ -93,7 +86,9 @@ func (m *MCPManager) GetClient(connectorID string) (MCPClientInterface, bool) {
 // CloseAll closes all MCP clients.
 func (m *MCPManager) CloseAll() {
 	for id, client := range m.clients {
-		_ = client.Close()
+		if err := client.Close(); err != nil {
+			log.Printf("close MCP client error for %s: %v", id, err)
+		}
 		delete(m.clients, id)
 	}
 }
