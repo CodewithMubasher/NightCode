@@ -1,18 +1,20 @@
 <div align="center">
 
-<img src="readmeicon.png" alt="NightCode logo" width="140" />
+  <!-- Header with Logo and Large Title side-by-side -->
+  <h1 align="center" style="display: flex; align-items: center; justify-content: center; gap: 16px; border: none;">
+    <img src="readmeicon.png" alt="NightCode logo" width="60" style="vertical-align: middle;" />
+    <span style="font-size: 2.25em; font-weight: 800; vertical-align: middle;">NIGHTCODE</span>
+  </h1>
 
-# NightCode
+  <p><strong>An AI-powered coding agent with a chat interface. It reads, writes, edits, searches and runs code in your workspace, and every change can be undone.</strong></p>
 
-**An AI-powered coding agent with a chat interface. It reads, writes, edits, searches and runs code in your workspace, and every change can be undone.**
+  [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+  ![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)
+  ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
+  ![TypeScript](https://img.shields.io/badge/TypeScript-6-3178C6?logo=typescript&logoColor=white)
+  ![SQLite](https://img.shields.io/badge/SQLite-pure--Go-003B57?logo=sqlite&logoColor=white)
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)
-![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
-![TypeScript](https://img.shields.io/badge/TypeScript-6-3178C6?logo=typescript&logoColor=white)
-![SQLite](https://img.shields.io/badge/SQLite-pure--Go-003B57?logo=sqlite&logoColor=white)
-
-[Screenshots](#screenshots) · [Features](#features) · [Quick start](#quick-start) · [Configuration](#configuration) · [Architecture](#architecture) · [Providers](#llm-providers) · [Tools](#built-in-tools) · [MCP](#mcp-connectors) · [Roadmap](#roadmap)
+  [Screenshots](#screenshots) · [Features](#features) · [Quick start](#quick-start) · [Configuration](#configuration) · [Architecture](#architecture) · [Providers](#llm-providers) · [Tools](#built-in-tools) · [MCP](#mcp-connectors) · [Roadmap](#roadmap)
 
 </div>
 
@@ -32,7 +34,6 @@ The two communicate over HTTP and **Server-Sent Events (SSE)**, so responses and
 ## Screenshots
 
 <div align="center">
-
 <img src="image%20(3).png" alt="NightCode home page" width="100%" />
 <br/><sub><b>Home:</b> start a new chat and pick a model</sub>
 
