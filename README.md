@@ -1,6 +1,6 @@
 <div align="center">
 
-  <img src="Group 2.png" alt="NightCode Logo Header" width="600" />
+  <img src="Group 2.png" alt="NightCode Logo Header" width="380" />
 
   <p><strong>An AI-powered coding agent with a chat interface. It reads, writes, edits, searches and runs code in your workspace, and every change can be undone.</strong></p>
 
