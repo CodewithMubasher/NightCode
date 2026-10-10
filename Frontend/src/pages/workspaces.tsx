@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react"
-import { Search, Plus, Ellipsis } from "lucide-react"
+import { Search, Plus, Ellipsis, X } from "lucide-react"
 import { useNavigate } from "@tanstack/react-router"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -11,6 +11,8 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { DropdownMenu, DropdownMenuItem } from "@/components/ui/dropdown-menu"
+import { Alert, AlertAction } from "@/components/ui/alert"
+import { useApiError, clearApiError } from "@/lib/api-errors"
 import { fetchWorkspaces, createWorkspace, deleteWorkspace } from "@/lib/backend-runtime"
 
 interface Workspace {
@@ -31,6 +33,7 @@ export function Workspaces() {
   const [open, setOpen] = useState(false)
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
+  const apiError = useApiError()
 
   useEffect(() => {
     fetchWorkspaces().then((ws) => {
@@ -82,6 +85,15 @@ export function Workspaces() {
           </Button>
         </div>
       </div>
+
+      {apiError && (
+        <Alert variant="destructive" className="mb-4 shrink-0">
+          <AlertAction onClick={clearApiError} aria-label="Dismiss">
+            <X className="size-3.5" />
+          </AlertAction>
+          {apiError}
+        </Alert>
+      )}
 
       <div className="flex-1 overflow-auto pb-6">
         {loading ? (

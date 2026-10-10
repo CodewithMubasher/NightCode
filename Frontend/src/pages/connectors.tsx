@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react"
-import { Search, Plus, Ellipsis, Plug, Terminal, Power, PowerOff } from "lucide-react"
+import { Search, Plus, Ellipsis, Plug, Power, PowerOff, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -10,6 +10,8 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { DropdownMenu, DropdownMenuItem } from "@/components/ui/dropdown-menu"
+import { Alert, AlertAction } from "@/components/ui/alert"
+import { useApiError, clearApiError } from "@/lib/api-errors"
 import { fetchConnectors, createConnector, deleteConnector, toggleConnector, type Connector } from "@/lib/backend-runtime"
 
 function formatDate(ts: string): string {
@@ -22,6 +24,7 @@ export function Connectors() {
   const [open, setOpen] = useState(false)
   const [name, setName] = useState("")
   const [command, setCommand] = useState("")
+  const apiError = useApiError()
 
   useEffect(() => {
     fetchConnectors().then((cs) => {
@@ -81,6 +84,15 @@ export function Connectors() {
           </Button>
         </div>
       </div>
+
+      {apiError && (
+        <Alert variant="destructive" className="mb-4 shrink-0">
+          <AlertAction onClick={clearApiError} aria-label="Dismiss">
+            <X className="size-3.5" />
+          </AlertAction>
+          {apiError}
+        </Alert>
+      )}
 
       <div className="flex-1 overflow-auto pb-6">
         {loading ? (

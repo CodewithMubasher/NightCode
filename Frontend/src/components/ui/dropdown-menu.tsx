@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, type ReactNode } from "react"
+import { useState, useRef, useEffect, type ReactNode, type MouseEvent as ReactMouseEvent } from "react"
 
 interface DropdownMenuProps {
   trigger: ReactNode
@@ -40,7 +40,7 @@ export function DropdownMenu({ trigger, children, align = "right" }: DropdownMen
 
 interface DropdownMenuItemProps {
   children: ReactNode
-  onClick?: () => void
+  onClick?: (event: ReactMouseEvent<HTMLButtonElement>) => void
   variant?: "default" | "destructive"
 }
 

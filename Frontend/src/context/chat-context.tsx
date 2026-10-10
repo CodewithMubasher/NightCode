@@ -1,9 +1,11 @@
-import { createContext, useContext, useState, useCallback, useEffect, useMemo, type ReactNode } from "react"
+/* eslint-disable react-refresh/only-export-components */
+import { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from "react"
 import { type Chat, type Message, type MessagePart, type ArtifactPart, type TurnSegment, generateId, truncateTitle } from "@/types/message"
 import { fetchChats, fetchMessages, type ChatRow, type MessageRow } from "@/lib/backend-runtime"
 import { getFileLanguage } from "@/lib/constants"
 
 const STORAGE_KEY = "nightcode-chats"
+const SAVE_DEBOUNCE_MS = 300
 
 function loadChats(): Chat[] {
   try {
@@ -11,7 +13,8 @@ function loadChats(): Chat[] {
     if (!raw) return []
     const parsed = JSON.parse(raw) as Chat[]
     return parsed.map((c) => ({ ...c, artifacts: c.artifacts ?? [] }))
-  } catch {
+  } catch (e) {
+    console.error("Failed to load chats from localStorage:", e)
     return []
   }
 }
@@ -19,7 +22,9 @@ function loadChats(): Chat[] {
 function saveChats(chats: Chat[]) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(chats))
-  } catch {}
+  } catch (e) {
+    console.error("Failed to save chats to localStorage:", e)
+  }
 }
 
 function extractTextFromSegments(segments: string): string {
@@ -27,7 +32,8 @@ function extractTextFromSegments(segments: string): string {
   try {
     const segs = JSON.parse(segments) as Array<{ type: string; text?: string }>
     return segs.filter((s) => s.type === "text").map((s) => s.text || "").join("")
-  } catch {
+  } catch (e) {
+    console.warn("Failed to parse message segments:", e)
     return ""
   }
 }
@@ -79,8 +85,22 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [isArtifactPanelOpen, setIsArtifactPanelOpen] = useState(false)
   const [activeArtifactId, setActiveArtifactId] = useState<string | null>(null)
 
+  // Always holds the latest chats so async loaders never read a stale closure.
+  const chatsRef = useRef(chats)
   useEffect(() => {
-    saveChats(chats)
+    chatsRef.current = chats
+  }, [chats])
+
+  useEffect(() => {
+    // Debounce localStorage writes so rapid updates don't hammer storage,
+    // but flush on page unload so the final state isn't lost.
+    const timer = setTimeout(() => saveChats(chats), SAVE_DEBOUNCE_MS)
+    const flush = () => saveChats(chats)
+    window.addEventListener("beforeunload", flush)
+    return () => {
+      clearTimeout(timer)
+      window.removeEventListener("beforeunload", flush)
+    }
   }, [chats])
 
   const getChat = useCallback((id: string) => {
@@ -144,8 +164,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setChats((prev) =>
       prev.map((chat) => {
         if (chat.id !== chatId) return chat
-        const exists = chat.artifacts.some((a) => a.id === artifact.id)
-        if (exists) {
+        const exists = chat.artifacts.some(
+          (a) => a.id === artifact.id && a.content === artifact.content && a.name === artifact.name
+        )
+        // Skip identical artifacts so repeated fetches don't churn state
+        // (which previously caused needless re-render loops in the panel).
+        if (exists) return chat
+        const found = chat.artifacts.some((a) => a.id === artifact.id)
+        if (found) {
           return {
             ...chat,
             artifacts: chat.artifacts.map((a) => (a.id === artifact.id ? artifact : a)),
@@ -180,15 +206,19 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const loadChatsForWorkspace = useCallback(async (workspaceId: string) => {
     const backendChats = await fetchChats(workspaceId)
     const converted = backendChats.map(convertChatRow)
-    // Merge with local chats, preferring backend for same IDs
-    const merged = new Map<string, Chat>()
-    for (const c of chats) merged.set(c.id, c)
-    for (const c of converted) merged.set(c.id, c)
-    setChats(Array.from(merged.values()))
-  }, [chats])
+    // Merge inside the updater so concurrent chat changes aren't overwritten
+    // by a stale closure snapshot taken before the fetch resolved.
+    setChats((prev) => {
+      const merged = new Map<string, Chat>()
+      for (const c of prev) merged.set(c.id, c)
+      for (const c of converted) merged.set(c.id, c)
+      return Array.from(merged.values())
+    })
+  }, [])
 
   const loadMessagesForChat = useCallback(async (chatId: string) => {
-    const backendMessages = await fetchMessages(chatId)
+    const workspaceId = chatsRef.current.find((c) => c.id === chatId)?.workspaceId
+    const backendMessages = await fetchMessages(chatId, workspaceId)
     const converted = backendMessages.map(convertMessageRow)
     setChats((prev) =>
       prev.map((chat) => {

@@ -20,7 +20,9 @@ import {
 } from "@/components/ui/attachment"
 import { Search, Plus, X, GitBranch } from "lucide-react"
 import type { AttachmentPart } from "@/types/message"
-import { fetchWorkspaces, fetchArtifacts } from "@/lib/backend-runtime"
+import { fetchWorkspaces } from "@/lib/backend-runtime"
+import { Alert, AlertAction } from "@/components/ui/alert"
+import { useApiError, clearApiError } from "@/lib/api-errors"
 import { ACCEPTED_EXTENSIONS } from "@/lib/constants"
 
 interface Workspace {
@@ -46,7 +48,9 @@ function loadGitData(workspaceId: string): GitData {
   try {
     const raw = localStorage.getItem(`nightcode-git-${workspaceId}`)
     if (raw) return JSON.parse(raw) as GitData
-  } catch {}
+  } catch (e) {
+    console.error("Failed to load git data from localStorage:", e)
+  }
   return {
     remoteUrl: "",
     totalCommits: 0,
@@ -57,7 +61,9 @@ function loadGitData(workspaceId: string): GitData {
 function saveGitData(workspaceId: string, data: GitData) {
   try {
     localStorage.setItem(`nightcode-git-${workspaceId}`, JSON.stringify(data))
-  } catch {}
+  } catch (e) {
+    console.error("Failed to save git data to localStorage:", e)
+  }
 }
 
 function loadContextFiles(workspaceId: string): ContextFile[] {
@@ -65,7 +71,8 @@ function loadContextFiles(workspaceId: string): ContextFile[] {
     const raw = localStorage.getItem(`nightcode-context-${workspaceId}`)
     if (!raw) return []
     return JSON.parse(raw) as ContextFile[]
-  } catch {
+  } catch (e) {
+    console.error("Failed to load context files from localStorage:", e)
     return []
   }
 }
@@ -73,7 +80,9 @@ function loadContextFiles(workspaceId: string): ContextFile[] {
 function saveContextFiles(workspaceId: string, files: ContextFile[]) {
   try {
     localStorage.setItem(`nightcode-context-${workspaceId}`, JSON.stringify(files))
-  } catch {}
+  } catch (e) {
+    console.error("Failed to save context files to localStorage:", e)
+  }
 }
 
 function getFileExtensionBadge(name: string): string {
@@ -90,6 +99,7 @@ export function WorkspaceView({ workspaceId }: { workspaceId: string }) {
   const { chats, createChat, addMessage } = useChats()
   const [workspaces, setWorkspaces] = useState<Workspace[]>([])
   const [loadingWorkspaces, setLoadingWorkspaces] = useState(true)
+  const apiError = useApiError()
 
   useEffect(() => {
     fetchWorkspaces().then((ws) => {
@@ -175,6 +185,15 @@ export function WorkspaceView({ workspaceId }: { workspaceId: string }) {
           </BreadcrumbList>
         </Breadcrumb>
       </div>
+
+      {apiError && (
+        <Alert variant="destructive" className="mx-14 mt-4 shrink-0">
+          <AlertAction onClick={clearApiError} aria-label="Dismiss">
+            <X className="size-3.5" />
+          </AlertAction>
+          {apiError}
+        </Alert>
+      )}
 
       {/* Two columns */}
       <div className="flex items-start gap-10 mt-40 px-14">

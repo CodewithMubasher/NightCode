@@ -11,7 +11,7 @@ type CleanupFn = () => void
 
 function typeText(
   text: string,
-  segmentId: string,
+  _segmentId: string,
   onDelta: (text: string) => void,
   onDone: () => void
 ): CleanupFn {

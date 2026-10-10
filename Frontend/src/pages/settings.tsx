@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, type ReactElement } from "react"
 import {
   UserIcon,
   ShieldIcon,
@@ -205,7 +205,7 @@ function AboutTab() {
   )
 }
 
-const tabs: Record<string, () => JSX.Element> = {
+const tabs: Record<string, () => ReactElement> = {
   profile: ProfileTab,
   account: AccountTab,
   "api-keys": ApiKeysTab,

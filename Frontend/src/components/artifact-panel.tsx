@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { ArrowLeft, Copy, Check, Download, X, FileText, Code, Maximize2, RefreshCw } from "lucide-react"
 import { useChats } from "@/context/chat-context"
 import { MarkdownRenderer } from "@/components/markdown-renderer"
@@ -15,9 +15,9 @@ function getLanguageLabel(language?: string): string {
   return language.toUpperCase()
 }
 
-function getArtifactIcon(artifact: ArtifactPart) {
-  if (artifact.artifactType === "document") return FileText
-  return Code
+const ARTIFACT_ICONS: Record<"document" | "code", typeof FileText> = {
+  document: FileText,
+  code: Code,
 }
 
 function downloadFile(name: string, content: string) {
@@ -40,7 +40,8 @@ function CodeHighlighter({ code, language }: { code: string; language?: string }
       theme: "github-dark",
     }).then((result) => {
       if (!cancelled) setHtml(result)
-    }).catch(() => {
+    }).catch((e) => {
+      console.warn("Shiki highlighting failed:", e)
       if (!cancelled) setHtml(null)
     })
     return () => { cancelled = true }
@@ -48,6 +49,8 @@ function CodeHighlighter({ code, language }: { code: string; language?: string }
 
   if (html) {
     return (
+      // XSS safety: Shiki escapes code content when generating HTML; we
+      // intentionally trust its output rather than sanitizing.
       <div
         className="rounded-lg overflow-auto text-[13px] leading-5 font-mono whitespace-pre-wrap break-all scrollbar-hide [&_pre]:p-4 [&_pre]:whitespace-pre-wrap [&_pre]:break-all [&_pre]:!bg-transparent [&_pre]:border [&_pre]:border-white/10 [&_pre]:rounded-lg"
         dangerouslySetInnerHTML={{ __html: html }}
@@ -63,7 +66,7 @@ function CodeHighlighter({ code, language }: { code: string; language?: string }
 }
 
 function ArtifactCard({ artifact, onClick }: { artifact: ArtifactPart; onClick: () => void }) {
-  const Icon = getArtifactIcon(artifact)
+  const Icon = ARTIFACT_ICONS[artifact.artifactType === "document" ? "document" : "code"]
   const typeLabel = artifact.artifactType === "document" ? "Document" : "Code"
   const subtitle = artifact.language
     ? `${typeLabel} · ${getLanguageLabel(artifact.language)}`
@@ -94,11 +97,17 @@ function ArtifactCard({ artifact, onClick }: { artifact: ArtifactPart; onClick: 
 function DetailView({ artifact, onBack, onClose }: { artifact: ArtifactPart; onBack: () => void; onClose: () => void }) {
   const [copied, setCopied] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  useEffect(() => {
+    return () => clearTimeout(copyTimer.current)
+  }, [])
 
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(artifact.content)
     setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    clearTimeout(copyTimer.current)
+    copyTimer.current = setTimeout(() => setCopied(false), 2000)
   }, [artifact.content])
 
   const handleDownload = useCallback(() => {
@@ -150,26 +159,31 @@ export function ArtifactPanel({ chatId }: ArtifactPanelProps) {
   const { activeArtifactId, openArtifact, closeArtifactPanel, getArtifactsForChat, addArtifact } = useChats()
   const [backendArtifacts, setBackendArtifacts] = useState<Artifact[]>([])
   const [loading, setLoading] = useState(true)
+  const mountedRef = useRef(true)
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
 
   // Fetch artifacts from backend on mount
   useEffect(() => {
     let cancelled = false
     fetchArtifacts(chatId).then((artifacts) => {
-      if (!cancelled) {
-        setBackendArtifacts(artifacts)
-        setLoading(false)
-        // Also add to local chat context for backward compatibility
-        for (const a of artifacts) {
-          addArtifact(chatId, {
-            type: "artifact",
-            id: a.id,
-            name: a.name,
-            content: a.content,
-            artifactType: a.artifact_type as "document" | "code",
-            language: a.language,
-            createdAt: new Date(a.created_at).getTime(),
-          })
-        }
+      if (cancelled) return
+      setBackendArtifacts(artifacts)
+      setLoading(false)
+      // Also add to local chat context for backward compatibility
+      for (const a of artifacts) {
+        addArtifact(chatId, {
+          type: "artifact",
+          id: a.id,
+          name: a.name,
+          content: a.content,
+          artifactType: a.artifact_type as "document" | "code",
+          language: a.language,
+          createdAt: new Date(a.created_at).getTime(),
+        })
       }
     })
     return () => { cancelled = true }
@@ -211,6 +225,7 @@ export function ArtifactPanel({ chatId }: ArtifactPanelProps) {
   const handleRefresh = useCallback(() => {
     setLoading(true)
     fetchArtifacts(chatId).then((fetched) => {
+      if (!mountedRef.current) return
       setBackendArtifacts(fetched)
       setLoading(false)
       for (const a of fetched) {

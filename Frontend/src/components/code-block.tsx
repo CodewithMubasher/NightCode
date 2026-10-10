@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Copy, Check } from "lucide-react"
 import { codeToHtml } from "shiki"
 
@@ -10,6 +10,11 @@ interface CodeBlockProps {
 export function CodeBlock({ language, children }: CodeBlockProps) {
   const [copied, setCopied] = useState(false)
   const [html, setHtml] = useState<string | null>(null)
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  useEffect(() => {
+    return () => clearTimeout(copyTimer.current)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -18,7 +23,8 @@ export function CodeBlock({ language, children }: CodeBlockProps) {
       theme: "github-dark",
     }).then((result) => {
       if (!cancelled) setHtml(result)
-    }).catch(() => {
+    }).catch((e) => {
+      console.warn("Shiki highlighting failed:", e)
       if (!cancelled) setHtml(null)
     })
     return () => { cancelled = true }
@@ -27,7 +33,8 @@ export function CodeBlock({ language, children }: CodeBlockProps) {
   const handleCopy = () => {
     navigator.clipboard.writeText(children)
     setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    clearTimeout(copyTimer.current)
+    copyTimer.current = setTimeout(() => setCopied(false), 2000)
   }
 
   return (
@@ -43,6 +50,9 @@ export function CodeBlock({ language, children }: CodeBlockProps) {
         </button>
       </div>
       {html ? (
+        // XSS safety: Shiki escapes all code content when generating HTML;
+        // the only unescaped markup comes from Shiki's own theme classes.
+        // We intentionally trust Shiki's output here rather than sanitizing.
         <div
           className="text-[13px] leading-5 font-mono scrollbar-hide [&_pre]:p-4 [&_pre]:whitespace-pre-wrap [&_pre]:break-all [&_pre]:!bg-transparent [&_pre]:overflow-hidden"
           dangerouslySetInnerHTML={{ __html: html }}

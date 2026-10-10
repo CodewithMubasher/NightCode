@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import { CodeBlock } from "@/components/code-block"
 import type { Root, Content, PhrasingContent } from "mdast"
 

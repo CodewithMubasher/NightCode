@@ -39,7 +39,8 @@ function MarkdownRendererInner({ content, isStreaming = false }: MarkdownRendere
   const ast = useMemo(() => {
     try {
       return parseMarkdown(throttledContent)
-    } catch {
+    } catch (e) {
+      console.warn("Markdown parse failed, rendering empty:", e)
       return parseMarkdown("")
     }
   }, [throttledContent])

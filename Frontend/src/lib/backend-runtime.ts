@@ -1,4 +1,5 @@
 import type { RuntimeEvent } from "@/types/events"
+import { reportApiError } from "@/lib/api-errors"
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3001"
 
@@ -42,6 +43,10 @@ export interface ModelOption {
   default: boolean
 }
 
+function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e)
+}
+
 /**
  * Fetches the real, currently-usable models from the backend (only models
  * for providers that have an API key configured are returned).
@@ -55,7 +60,7 @@ export async function fetchModels(): Promise<ModelOption[]> {
     }
     return await response.json()
   } catch (e) {
-    console.warn("Failed to fetch models:", e)
+    reportApiError(`Failed to fetch models: ${errorMessage(e)}`)
     return []
   }
 }
@@ -152,7 +157,7 @@ export async function cancelBackendRun(chatId: string, workspaceId?: string): Pr
   try {
     await fetch(url, { method: "DELETE" })
   } catch (e) {
-    console.warn("Failed to cancel run:", e)
+    reportApiError(`Failed to cancel run: ${errorMessage(e)}`)
   }
 }
 
@@ -169,7 +174,7 @@ export async function fetchArtifacts(chatId: string, workspaceId?: string): Prom
     }
     return await response.json()
   } catch (e) {
-    console.warn("Failed to fetch artifacts:", e)
+    reportApiError(`Failed to fetch artifacts: ${errorMessage(e)}`)
     return []
   }
 }
@@ -183,7 +188,7 @@ export async function fetchWorkspaces(): Promise<Workspace[]> {
     }
     return await response.json()
   } catch (e) {
-    console.warn("Failed to fetch workspaces:", e)
+    reportApiError(`Failed to fetch workspaces: ${errorMessage(e)}`)
     return []
   }
 }
@@ -202,7 +207,7 @@ export async function createWorkspace(name: string, description: string): Promis
     const data = await response.json()
     return data.id
   } catch (e) {
-    console.warn("Failed to create workspace:", e)
+    reportApiError(`Failed to create workspace: ${errorMessage(e)}`)
     return null
   }
 }
@@ -211,9 +216,12 @@ export async function deleteWorkspace(workspaceId: string): Promise<boolean> {
   const url = `${API_BASE}/api/workspaces/${workspaceId}`
   try {
     const response = await fetch(url, { method: "DELETE" })
-    return response.ok
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+    }
+    return true
   } catch (e) {
-    console.warn("Failed to delete workspace:", e)
+    reportApiError(`Failed to delete workspace: ${errorMessage(e)}`)
     return false
   }
 }
@@ -227,13 +235,14 @@ export async function fetchChats(workspaceId: string): Promise<ChatRow[]> {
     }
     return await response.json()
   } catch (e) {
-    console.warn("Failed to fetch chats:", e)
+    reportApiError(`Failed to fetch chats: ${errorMessage(e)}`)
     return []
   }
 }
 
-export async function fetchMessages(chatId: string): Promise<MessageRow[]> {
-  const url = `${API_BASE}/api/workspaces/default/chats/${chatId}/messages`
+export async function fetchMessages(chatId: string, workspaceId?: string): Promise<MessageRow[]> {
+  const ws = workspaceId || "default"
+  const url = `${API_BASE}/api/workspaces/${ws}/chats/${chatId}/messages`
   try {
     const response = await fetch(url)
     if (!response.ok) {
@@ -241,7 +250,7 @@ export async function fetchMessages(chatId: string): Promise<MessageRow[]> {
     }
     return await response.json()
   } catch (e) {
-    console.warn("Failed to fetch messages:", e)
+    reportApiError(`Failed to fetch messages: ${errorMessage(e)}`)
     return []
   }
 }
@@ -267,7 +276,7 @@ export async function fetchConnectors(): Promise<Connector[]> {
     }
     return await response.json()
   } catch (e) {
-    console.warn("Failed to fetch connectors:", e)
+    reportApiError(`Failed to fetch connectors: ${errorMessage(e)}`)
     return []
   }
 }
@@ -286,7 +295,7 @@ export async function createConnector(name: string, command: string): Promise<st
     const data = await response.json()
     return data.id
   } catch (e) {
-    console.warn("Failed to create connector:", e)
+    reportApiError(`Failed to create connector: ${errorMessage(e)}`)
     return null
   }
 }
@@ -295,9 +304,12 @@ export async function deleteConnector(connectorId: string): Promise<boolean> {
   const url = `${API_BASE}/api/connectors/${connectorId}`
   try {
     const response = await fetch(url, { method: "DELETE" })
-    return response.ok
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+    }
+    return true
   } catch (e) {
-    console.warn("Failed to delete connector:", e)
+    reportApiError(`Failed to delete connector: ${errorMessage(e)}`)
     return false
   }
 }
@@ -310,9 +322,12 @@ export async function toggleConnector(connectorId: string, enabled: boolean): Pr
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ enabled }),
     })
-    return response.ok
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+    }
+    return true
   } catch (e) {
-    console.warn("Failed to toggle connector:", e)
+    reportApiError(`Failed to toggle connector: ${errorMessage(e)}`)
     return false
   }
 }
@@ -337,7 +352,7 @@ export async function reverseMessage(messageId: string, chatId: string, workspac
     }
     return await response.json()
   } catch (e) {
-    console.warn("Failed to reverse message:", e)
+    reportApiError(`Failed to reverse message: ${errorMessage(e)}`)
     return null
   }
 }

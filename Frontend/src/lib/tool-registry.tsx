@@ -1,11 +1,6 @@
 import type { ToolCallEntry } from "@/types/message"
 import { FileText, FilePen, FilePlus2, Terminal, Search, Globe, Wrench, Folder, GitBranch, GitCommitHorizontal, Plug, type LucideIcon } from "lucide-react"
 
-const hideScrollbarStyle = `
-  .hide-scrollbar::-webkit-scrollbar { display: none; }
-  .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-`
-
 export interface ToolRenderer {
   icon: LucideIcon
   label: string
@@ -234,12 +229,12 @@ const fallbackRenderer: ToolRenderer = {
     if (!entry.input && !entry.output) return null
     return (
       <div className="mt-2 text-xs">
-        {entry.input && (
+        {Boolean(entry.input) && (
           <pre className="rounded-lg bg-white/5 border border-white/10 p-3 overflow-x-auto hide-scrollbar text-white/70 font-mono text-[11px] leading-4 max-h-48 overflow-y-auto">
             {typeof entry.input === "string" ? entry.input : JSON.stringify(entry.input, null, 2)}
           </pre>
         )}
-        {entry.output && (
+        {Boolean(entry.output) && (
           <pre className="mt-1 rounded-lg bg-white/5 border border-white/10 p-3 overflow-x-auto hide-scrollbar text-white/60 font-mono text-[11px] leading-4 max-h-48 overflow-y-auto">
             {typeof entry.output === "string" ? entry.output : JSON.stringify(entry.output, null, 2)}
           </pre>
@@ -267,12 +262,12 @@ export function getToolRenderer(toolName: string): ToolRenderer {
         if (!entry.input && !entry.output) return null
         return (
           <div className="mt-2 text-xs">
-            {entry.input && (
+            {Boolean(entry.input) && (
               <pre className="rounded-lg bg-white/5 border border-white/10 p-3 overflow-x-auto hide-scrollbar text-white/70 font-mono text-[11px] leading-4 max-h-48 overflow-y-auto">
                 {typeof entry.input === "string" ? entry.input : JSON.stringify(entry.input, null, 2)}
               </pre>
             )}
-            {entry.output && (
+            {Boolean(entry.output) && (
               <pre className="mt-1 rounded-lg bg-white/5 border border-white/10 p-3 overflow-x-auto hide-scrollbar text-white/60 font-mono text-[11px] leading-4 max-h-48 overflow-y-auto">
                 {typeof entry.output === "string" ? entry.output : JSON.stringify(entry.output, null, 2)}
               </pre>

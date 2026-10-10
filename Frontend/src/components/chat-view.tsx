@@ -15,7 +15,7 @@ import {
 import { Eclipse, Copy, ThumbsUp, ThumbsDown, RotateCcw, FileText } from "lucide-react"
 import { emitFakeRuntime } from "@/lib/runtime"
 import { emitBackendRuntime, cancelBackendRun, reverseMessage } from "@/lib/backend-runtime"
-import type { RuntimeEvent, ArtifactCreatedEvent } from "@/types/events"
+import type { RuntimeEvent } from "@/types/events"
 import type { ModelOption } from "@/lib/backend-runtime"
 import { takePendingModel } from "@/lib/pending-model"
 import type { AttachmentPart, TurnSegment, ToolCallEntry } from "@/types/message"
@@ -149,7 +149,7 @@ export function ChatView({ chatId }: ChatViewProps) {
   const chat = getChat(chatId)
 
   const [events, setEvents] = useState<RuntimeEvent[]>([])
-  const [currentText, setCurrentText] = useState("")
+  const [, setCurrentText] = useState("")
   const [errorText, setErrorText] = useState("")
   const [retryStatus, setRetryStatus] = useState<{ attempt: number; maxAttempt: number; retryAfterMs: number; reason: string } | null>(null)
 
@@ -176,21 +176,6 @@ export function ChatView({ chatId }: ChatViewProps) {
   }
 
   const isLive = phase !== "idle"
-
-  useEffect(() => {
-    if (!chat || hasTriggeredRef.current) return
-    const lastMsg = chat.messages[chat.messages.length - 1]
-    if (!lastMsg || lastMsg.role !== "user") return
-
-    const hasAssistantResponse = chat.messages.some((m) => m.role === "assistant")
-    if (hasAssistantResponse) return
-
-    hasTriggeredRef.current = true
-    const lastUserMsg = chat.messages.filter((m) => m.role === "user").pop()
-    const userText = lastUserMsg?.parts.find((p) => p.type === "text")?.text ?? ""
-    const model = takePendingModel(chatId)
-    startRuntime(userText, model)
-  }, [chat, chatId])
 
   const startRuntime = useCallback((userMessage?: string, model?: ModelOption | null) => {
     setEvents([])
@@ -239,15 +224,14 @@ export function ChatView({ chatId }: ChatViewProps) {
           }
 
           if (event.type === "artifact.created") {
-            const artifactEvent = event as ArtifactCreatedEvent
             addArtifact(chatId, {
               type: "artifact",
-              id: artifactEvent.artifactId,
-              name: artifactEvent.name,
-              content: artifactEvent.content,
-              artifactType: artifactEvent.artifactType,
-              language: artifactEvent.language,
-              createdAt: artifactEvent.timestamp,
+              id: event.artifactId,
+              name: event.name,
+              content: event.content,
+              artifactType: event.artifactType,
+              language: event.language,
+              createdAt: event.timestamp,
             })
           }
         },
@@ -316,15 +300,14 @@ export function ChatView({ chatId }: ChatViewProps) {
           }
 
           if (event.type === "artifact.created") {
-            const artifactEvent = event as ArtifactCreatedEvent
             addArtifact(chatId, {
               type: "artifact",
-              id: artifactEvent.artifactId,
-              name: artifactEvent.name,
-              content: artifactEvent.content,
-              artifactType: artifactEvent.artifactType,
-              language: artifactEvent.language,
-              createdAt: artifactEvent.timestamp,
+              id: event.artifactId,
+              name: event.name,
+              content: event.content,
+              artifactType: event.artifactType,
+              language: event.language,
+              createdAt: event.timestamp,
             })
           }
         },
@@ -333,6 +316,26 @@ export function ChatView({ chatId }: ChatViewProps) {
       cleanupRef.current = cleanup
     }
   }, [chatId, chat?.workspaceId, addMessage, addArtifact])
+
+  // Auto-start the runtime for a freshly created chat whose last message is
+  // from the user (declared after startRuntime so the reference is stable).
+  useEffect(() => {
+    if (!chat || hasTriggeredRef.current) return
+    const lastMsg = chat.messages[chat.messages.length - 1]
+    if (!lastMsg || lastMsg.role !== "user") return
+
+    const hasAssistantResponse = chat.messages.some((m) => m.role === "assistant")
+    if (hasAssistantResponse) return
+
+    hasTriggeredRef.current = true
+    const lastUserMsg = chat.messages.filter((m) => m.role === "user").pop()
+    const userText = lastUserMsg?.parts.find((p) => p.type === "text")?.text ?? ""
+    const model = takePendingModel(chatId)
+    // Starting the SSE run is the point of this effect (external system init
+    // on mount); the setState calls inside startRuntime reset local stream UI.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    startRuntime(userText, model)
+  }, [chat, chatId, startRuntime])
 
   const handleSend = useCallback((message: string, attachments: AttachmentPart[] = [], model?: ModelOption | null) => {
     if (cleanupRef.current) {
@@ -360,8 +363,12 @@ export function ChatView({ chatId }: ChatViewProps) {
     const workspaceId = chat?.workspaceId
     cancelBackendRun(chatId, workspaceId)
 
-    if (currentTextRef.current || segments.length > 0) {
-      addMessage(chatId, "assistant", [], segments)
+    // Derive segments from the events ref instead of the memoized `segments`
+    // so this callback keeps a stable identity during streaming (the old
+    // `[... segments]` dep recreated it on every event).
+    const currentSegments = mergeAdjacentToolGroups(accumulateSegments(eventsRef.current))
+    if (currentTextRef.current || currentSegments.length > 0) {
+      addMessage(chatId, "assistant", [], currentSegments)
     } else {
       // Nothing was produced yet (e.g. cancelled mid-retry-backoff, before
       // any text or tool call arrived) — leave a visible trace instead of
@@ -377,7 +384,7 @@ export function ChatView({ chatId }: ChatViewProps) {
     setEvents([])
     eventsRef.current = []
     setRetryStatus(null)
-  }, [chatId, chat?.workspaceId, addMessage, segments])
+  }, [chatId, chat?.workspaceId, addMessage])
 
   const handleOpenToolArtifact = useCallback((call: ToolCallEntry) => {
     if (call.name === "read_file") return
@@ -440,29 +447,32 @@ export function ChatView({ chatId }: ChatViewProps) {
     }
   }, [isArtifactPanelOpen, openArtifactPanel, closeArtifactPanel])
 
+  const toggleArtifactPanelRef = useRef(toggleArtifactPanel)
+  useEffect(() => {
+    toggleArtifactPanelRef.current = toggleArtifactPanel
+  }, [toggleArtifactPanel])
+
+  // Register the listener once: reading the latest toggle through a ref
+  // avoids tearing down/re-adding the window listener on every panel toggle.
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.repeat || event.metaKey || event.ctrlKey || event.altKey) return
       const tag = (event.target as HTMLElement).tagName
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return
       if (event.key.toLowerCase() === "d") {
-        if (isArtifactPanelOpen) {
-          closeArtifactPanel()
-        } else {
-          openArtifactPanel()
-        }
+        toggleArtifactPanelRef.current()
       }
     }
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [isArtifactPanelOpen, openArtifactPanel, closeArtifactPanel])
+  }, [])
 
   const isError = phase === "error"
   const isGenerating = phase !== "idle"
 
   return (
     <div className="flex h-full min-h-0">
-      <div className={`flex flex-col flex-1 min-w-0 transition-all duration-300 ease-in-out ${isArtifactPanelOpen ? "" : ""}`}>
+      <div className="flex flex-col flex-1 min-w-0 transition-all duration-300 ease-in-out">
         <div className="relative">
           <button
             onClick={toggleArtifactPanel}
