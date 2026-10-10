@@ -49,7 +49,12 @@ func (h *Handler) HandleReverseMessage(w http.ResponseWriter, r *http.Request) {
 
 	ws, wsErr := tools.NewWorkspace(workspacePath)
 	if wsErr != nil {
-		ws, _ = tools.NewWorkspace(".")
+		// Don't silently fall back to the process CWD — reversing files
+		// outside the workspace (or nil-dereferencing a failed fallback)
+		// is worse than returning an error.
+		log.Printf("reverse: workspace resolve error: %v", wsErr)
+		http.Error(w, `{"error":"failed to resolve workspace"}`, http.StatusInternalServerError)
+		return
 	}
 
 	var summary reverseSummary
@@ -102,7 +107,7 @@ func (h *Handler) HandleReverseMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(summary)
+	writeJSON(w, summary)
 }
 
 func (h *Handler) reverseWriteFile(data json.RawMessage, ws *tools.Workspace) string {
@@ -167,18 +172,22 @@ func (h *Handler) reverseEditFile(data json.RawMessage, ws *tools.Workspace) str
 		if count2 == 1 {
 			newContent := strings.Replace(content, reversal.NewString, reversal.OldString, 1)
 			if err := os.WriteFile(resolved, []byte(newContent), 0o644); err != nil {
+				log.Printf("reverse: write (swap) error: %v", err)
 				return "error"
 			}
 			return "ok"
 		}
+		log.Printf("reverse: old_string not found (%d) and new_string count=%d in %s", count, count2, reversal.Path)
 		return "error"
 	}
 	if count > 1 {
+		log.Printf("reverse: old_string appears %d times (expected 1) in %s", count, reversal.Path)
 		return "error"
 	}
 
 	newContent := strings.Replace(content, reversal.OldString, reversal.NewString, 1)
 	if err := os.WriteFile(resolved, []byte(newContent), 0o644); err != nil {
+		log.Printf("reverse: write error: %v", err)
 		return "error"
 	}
 	return "ok"

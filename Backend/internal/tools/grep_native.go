@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -38,27 +40,57 @@ func (t *GrepTool) execNativeImpl(ctx context.Context, in GrepInput, searchRoot 
 
 		// Apply glob filter
 		if in.PathGlob != "" {
-			relPath, _ := filepath.Rel(searchRoot, path)
+			relPath, relErr := filepath.Rel(searchRoot, path)
+			if relErr != nil {
+				relPath = path
+			}
 			relPathSlash := filepath.ToSlash(relPath)
-			matched, _ := doublestar.Match(in.PathGlob, relPathSlash)
+			matched, matchErr := doublestar.Match(in.PathGlob, relPathSlash)
+			if matchErr != nil {
+				log.Printf("grep native: glob match error for %s: %v", relPathSlash, matchErr)
+			}
 			if !matched {
-				matched, _ = doublestar.Match(in.PathGlob, filepath.Base(path))
+				matched, matchErr = doublestar.Match(in.PathGlob, filepath.Base(path))
+				if matchErr != nil {
+					log.Printf("grep native: glob match error for %s: %v", filepath.Base(path), matchErr)
+				}
 				if !matched {
 					return nil
 				}
 			}
 		}
 
-		// Skip binary files
-		if isBinaryFile(path) {
-			return nil
-		}
-
+		// Open once: peek the first 512 bytes for a NUL byte (binary
+		// heuristic), then reuse the same handle for line scanning — avoids
+		// opening every file twice.
 		f, err := os.Open(path)
 		if err != nil {
 			return nil
 		}
-		defer f.Close()
+
+		peek := make([]byte, 512)
+		n, readErr := f.Read(peek)
+		if readErr != nil && readErr != io.EOF {
+			f.Close()
+			return nil
+		}
+		isBinary := false
+		for i := 0; i < n; i++ {
+			if peek[i] == 0 {
+				isBinary = true
+				break
+			}
+		}
+		if isBinary {
+			f.Close()
+			return nil
+		}
+
+		// Rewind to the start for the scanner.
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			f.Close()
+			return nil
+		}
 
 		scanner := bufio.NewScanner(f)
 		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -76,10 +108,12 @@ func (t *GrepTool) execNativeImpl(ctx context.Context, in GrepInput, searchRoot 
 				})
 				if len(matches) >= grepMaxMatches {
 					truncated = true
+					f.Close()
 					return filepath.SkipAll
 				}
 			}
 		}
+		f.Close()
 		return nil
 	})
 
@@ -98,25 +132,4 @@ func (t *GrepTool) execNativeImpl(ctx context.Context, in GrepInput, searchRoot 
 	}
 	resultBytes, _ := json.Marshal(out)
 	return ToolResult{Output: resultBytes}, nil
-}
-
-func isBinaryFile(path string) bool {
-	f, err := os.Open(path)
-	if err != nil {
-		return false
-	}
-	defer f.Close()
-
-	buf := make([]byte, 512)
-	n, err := f.Read(buf)
-	if err != nil {
-		return false
-	}
-
-	for i := 0; i < n; i++ {
-		if buf[i] == 0 {
-			return true
-		}
-	}
-	return false
 }

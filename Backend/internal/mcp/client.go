@@ -18,8 +18,13 @@ type Client struct {
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
 	stdout *bufio.Reader
-	mu     sync.Mutex
-	reqID  atomic.Int64
+	// mu guards pending/dead only. Never hold it across channel sends or
+	// stdin writes — those can block and cause deadlocks.
+	mu sync.Mutex
+	// writeMu serializes stdin writes so concurrent sendRequest calls
+	// don't interleave JSON-RPC frames.
+	writeMu sync.Mutex
+	reqID   atomic.Int64
 	// pending maps request IDs to response channels.
 	pending map[int]chan *JSONRPCResponse
 	dead    bool
@@ -87,18 +92,22 @@ func NewClient(ctx context.Context, command string, args []string, env []string)
 			log.Printf("[mcp] process exited cleanly")
 		}
 		c.mu.Lock()
-		if !c.dead {
-			c.dead = true
-			for id, ch := range c.pending {
-				ch <- &JSONRPCResponse{
-					JSONRPC: "2.0",
-					ID:      id,
-					Error:   &JSONRPCError{Code: -1, Message: "process exited"},
-				}
-				delete(c.pending, id)
+		pending := c.pending
+		c.pending = make(map[int]chan *JSONRPCResponse)
+		c.dead = true
+		c.mu.Unlock()
+		// Deliver errors outside the lock with non-blocking sends so a full
+		// channel buffer can never deadlock us while holding c.mu.
+		for id, ch := range pending {
+			select {
+			case ch <- &JSONRPCResponse{
+				JSONRPC: "2.0",
+				ID:      id,
+				Error:   &JSONRPCError{Code: -1, Message: "process exited"},
+			}:
+			default:
 			}
 		}
-		c.mu.Unlock()
 	}()
 
 	// Initialize handshake.
@@ -202,9 +211,11 @@ func (c *Client) sendRequest(ctx context.Context, method string, params interfac
 		c.mu.Unlock()
 	}()
 
-	c.mu.Lock()
+	// Write under writeMu (not c.mu) so a blocked pipe write can't stall
+	// readLoop or other senders that need c.mu for the pending map.
+	c.writeMu.Lock()
 	_, err = c.stdin.Write(data)
-	c.mu.Unlock()
+	c.writeMu.Unlock()
 	if err != nil {
 		return fmt.Errorf("write request: %w", err)
 	}
@@ -240,8 +251,8 @@ func (c *Client) sendNotification(method string) error {
 		return err
 	}
 	data = append(data, '\n')
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
 	_, err = c.stdin.Write(data)
 	return err
 }
@@ -262,16 +273,20 @@ func (c *Client) readLoop(ctx context.Context) {
 			log.Printf("[mcp] stdout closed (EOF), marking client dead")
 			c.mu.Lock()
 			c.dead = true
-			// Unblock any pending requests.
-			for id, ch := range c.pending {
-				ch <- &JSONRPCResponse{
+			pending := c.pending
+			c.pending = make(map[int]chan *JSONRPCResponse)
+			c.mu.Unlock()
+			// Unblock pending requests outside the lock with non-blocking sends.
+			for id, ch := range pending {
+				select {
+				case ch <- &JSONRPCResponse{
 					JSONRPC: "2.0",
 					ID:      id,
 					Error:   &JSONRPCError{Code: -1, Message: "client closed"},
+				}:
+				default:
 				}
-				delete(c.pending, id)
 			}
-			c.mu.Unlock()
 			return
 		}
 
@@ -292,7 +307,14 @@ func (c *Client) readLoop(ctx context.Context) {
 		ch, ok := c.pending[resp.ID]
 		c.mu.Unlock()
 		if ok {
-			ch <- &resp
+			// Non-blocking send: the channel has buffer 1 and only one
+			// response is expected per ID. If it's already full (e.g. a
+			// race with the exit-watcher), drop it rather than block.
+			select {
+			case ch <- &resp:
+			default:
+				log.Printf("[mcp] dropping duplicate response id=%d", resp.ID)
+			}
 		} else {
 			log.Printf("[mcp] unexpected response id=%d (no pending request)", resp.ID)
 		}

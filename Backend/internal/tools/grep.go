@@ -7,12 +7,42 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 )
 
 const grepMaxMatches = 200
+
+// splitRgLine parses ripgrep's "path:line:content" output line.
+// The line-number field is the first purely-numeric field at index >= 1,
+// which correctly handles Windows drive-letter colons (C:\path\file.go:12:content)
+// and content that itself contains colons. Returns ok=false when no valid
+// line-number field is found.
+func splitRgLine(line string) (path, lineNum, content string, ok bool) {
+	parts := strings.Split(line, ":")
+	// Need at least path:line:content (3 fields), or path:line (2 fields).
+	if len(parts) < 2 {
+		return "", "", "", false
+	}
+	// Find the line-number field: first numeric field starting at index 1
+	// (index 0 may be a bare Windows drive letter like "C").
+	lineIdx := -1
+	for i := 1; i < len(parts)-1; i++ {
+		if n, err := strconv.Atoi(parts[i]); err == nil && n > 0 {
+			lineIdx = i
+			break
+		}
+	}
+	if lineIdx == -1 {
+		return "", "", "", false
+	}
+	path = strings.Join(parts[:lineIdx], ":")
+	lineNum = parts[lineIdx]
+	content = strings.Join(parts[lineIdx+1:], ":")
+	return path, lineNum, content, true
+}
 
 // rgLookPath is injectable so tests can force the native fallback path.
 var rgLookPath = exec.LookPath
@@ -129,21 +159,23 @@ func (t *GrepTool) execRg(ctx context.Context, rgPath string, in GrepInput, sear
 			continue
 		}
 		// rg output format: filepath:linenum:content
-		// filepath can contain colons on Windows (e.g., C:\path), so split from the right
-		parts := strings.SplitN(line, ":", 3)
-		if len(parts) < 3 {
+		// On Windows the filepath contains a drive-letter colon (C:\...),
+		// and the content may contain colons too, so identify the numeric
+		// line-number field instead of splitting naively from the left.
+		relPath, lineNumStr, content, ok := splitRgLine(line)
+		if !ok {
 			continue
 		}
-		relPath := parts[0]
-		lineNum, parseErr := strconv.Atoi(parts[1])
+		lineNum, parseErr := strconv.Atoi(lineNumStr)
 		if parseErr != nil {
 			continue
 		}
-		content := parts[2]
 
-		// Make path relative to workspace root
-		if strings.HasPrefix(relPath, ws.Root) {
-			relPath = relPath[len(ws.Root)+1:]
+		// Make path relative to workspace root (case-insensitive on Windows)
+		rootSlash := filepath.ToSlash(ws.Root)
+		pathSlash := filepath.ToSlash(relPath)
+		if len(pathSlash) > len(rootSlash) && strings.EqualFold(pathSlash[:len(rootSlash)], rootSlash) {
+			relPath = filepath.FromSlash(pathSlash[len(rootSlash)+1:])
 		}
 
 		matches = append(matches, GrepMatch{

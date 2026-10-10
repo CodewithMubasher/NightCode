@@ -91,14 +91,19 @@ func (p *OpenRouterProvider) streamWithRetry(ctx context.Context, req ChatReques
 
 		// Rate limit: rotate to next API key before retrying
 		if perr.Kind == ErrorKindRateLimit {
-			if p.rotateKey() {
-				log.Printf("openrouter: rate limited, rotated to next API key (key %d/%d)", p.keyIndex+1, len(p.keys))
-				events <- ChatEvent{
+			if p.rotateKey(ctx) {
+				p.mu.Lock()
+				keyNum := p.keyIndex + 1
+				p.mu.Unlock()
+				log.Printf("openrouter: rate limited, rotated to next API key (key %d/%d)", keyNum, len(p.keys))
+				if !sendChatEvent(ctx, events, ChatEvent{
 					Type:       ChatEventRetry,
 					Err:        perr.Err,
 					Attempt:    attempt + 1,
 					MaxAttempt: maxRetryAttempts,
 					RetryAfter: delay,
+				}) {
+					return
 				}
 				select {
 				case <-ctx.Done():
@@ -111,17 +116,21 @@ func (p *OpenRouterProvider) streamWithRetry(ctx context.Context, req ChatReques
 		}
 
 		if !perr.Retryable || attempt >= maxRetryAttempts-1 {
-			events <- ChatEvent{Type: ChatEventError, Err: perr}
+			if !sendChatEvent(ctx, events, ChatEvent{Type: ChatEventError, Err: perr}) {
+				return
+			}
 			return
 		}
 
 		log.Printf("openrouter provider: retryable error (attempt %d/%d): %v", attempt+1, maxRetryAttempts, perr.Err)
-		events <- ChatEvent{
+		if !sendChatEvent(ctx, events, ChatEvent{
 			Type:       ChatEventRetry,
 			Err:        perr.Err,
 			Attempt:    attempt + 1,
 			MaxAttempt: maxRetryAttempts,
 			RetryAfter: delay,
+		}) {
+			return
 		}
 		select {
 		case <-ctx.Done():
@@ -134,7 +143,7 @@ func (p *OpenRouterProvider) streamWithRetry(ctx context.Context, req ChatReques
 
 // rotateKey switches to the next API key and rebuilds the chat model.
 // Returns false if there are no more keys to try.
-func (p *OpenRouterProvider) rotateKey() bool {
+func (p *OpenRouterProvider) rotateKey(ctx context.Context) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -144,7 +153,7 @@ func (p *OpenRouterProvider) rotateKey() bool {
 	}
 
 	p.keyIndex = nextIndex
-	cm, err := buildOpenRouterModel(context.Background(), p.keys[nextIndex], p.model, p.baseURL)
+	cm, err := buildOpenRouterModel(ctx, p.keys[nextIndex], p.model, p.baseURL)
 	if err != nil {
 		log.Printf("openrouter: failed to rebuild model with key %d: %v", nextIndex+1, err)
 		return false
@@ -157,19 +166,25 @@ func (p *OpenRouterProvider) streamOnce(ctx context.Context, req ChatRequest, ev
 	messages := ConvertOpenAICompatMessages(req)
 	toolInfos := ConvertOpenAICompatToolSpecs(req.Tools)
 
+	// Snapshot cm under the lock so a concurrent rotateKey can't swap
+	// the model out from under this stream.
+	p.mu.Lock()
+	cm := p.cm
+	p.mu.Unlock()
+
 	var (
 		sr  *schema.StreamReader[*schema.Message]
 		err error
 	)
 
 	if len(toolInfos) > 0 {
-		tcm, bindErr := p.cm.WithTools(toolInfos)
+		tcm, bindErr := cm.WithTools(toolInfos)
 		if bindErr != nil {
 			return &ProviderError{Kind: ErrorKindOther, Retryable: false, Err: fmt.Errorf("bind tools: %w", bindErr)}
 		}
 		sr, err = tcm.Stream(ctx, messages)
 	} else {
-		sr, err = p.cm.Stream(ctx, messages)
+		sr, err = cm.Stream(ctx, messages)
 	}
 
 	if err != nil {
@@ -191,7 +206,9 @@ func (p *OpenRouterProvider) streamOnce(ctx context.Context, req ChatRequest, ev
 		}
 
 		if msg.Content != "" {
-			events <- ChatEvent{Type: ChatEventDelta, Text: msg.Content}
+			if !sendChatEvent(ctx, events, ChatEvent{Type: ChatEventDelta, Text: msg.Content}) {
+				return nil
+			}
 		}
 		for _, tc := range msg.ToolCalls {
 			toolCalls = append(toolCalls, ToolCall{
@@ -204,7 +221,9 @@ func (p *OpenRouterProvider) streamOnce(ctx context.Context, req ChatRequest, ev
 	}
 
 	if len(toolCalls) > 0 {
-		events <- ChatEvent{Type: ChatEventToolCalls, ToolCalls: toolCalls}
+		if !sendChatEvent(ctx, events, ChatEvent{Type: ChatEventToolCalls, ToolCalls: toolCalls}) {
+			return nil
+		}
 	}
 	return nil
 }

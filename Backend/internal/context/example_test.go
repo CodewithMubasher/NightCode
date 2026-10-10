@@ -39,7 +39,7 @@ func TestRenderExampleSystemPrompt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	bc, err := Build(context.Background(), BuildRequest{
+	bc, err := NewContextManager(ContextBudget{}).Build(context.Background(), BuildRequest{
 		Workspace: ws,
 		ChatID:    "chat-1",
 		History: []Message{

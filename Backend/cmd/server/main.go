@@ -7,7 +7,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strings"
 
 	"github.com/CodewithMubasher/NightCode/backend/internal/api"
 	"github.com/CodewithMubasher/NightCode/backend/internal/provider"
@@ -17,8 +16,11 @@ import (
 )
 
 func main() {
-	// Load .env file if present (no error if missing)
-	_ = godotenv.Load()
+	// Load .env file if present. A missing file is fine; anything else
+	// (unreadable/corrupt) should be surfaced rather than silently ignored.
+	if err := godotenv.Load(); err != nil {
+		log.Printf("note: no .env loaded (%v) — using process environment", err)
+	}
 
 	port := os.Getenv("NIGHTCODE_PORT")
 	if port == "" {
@@ -376,10 +378,12 @@ func nightcodeModelOr(model string) string {
 func corsMiddleware(next http.Handler, allowedOrigin string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if origin == allowedOrigin || strings.HasPrefix(origin, "http://localhost") {
+		// Exact match only — a prefix check (e.g. HasPrefix "http://localhost")
+		// would allow malicious origins like http://localhost.evil.com.
+		if origin != "" && origin == allowedOrigin {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 		}
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, PATCH, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		w.Header().Set("Access-Control-Allow-Credentials", "true")
 

@@ -68,16 +68,20 @@ func (p *NightcodeProvider) streamWithRetry(ctx context.Context, req ChatRequest
 			return
 		}
 		if !perr.Retryable || attempt >= maxRetryAttempts-1 {
-			events <- ChatEvent{Type: ChatEventError, Err: perr}
+			if !sendChatEvent(ctx, events, ChatEvent{Type: ChatEventError, Err: perr}) {
+				return
+			}
 			return
 		}
 		log.Printf("nightcode provider: retryable error (attempt %d/%d): %v", attempt+1, maxRetryAttempts, perr.Err)
-		events <- ChatEvent{
+		if !sendChatEvent(ctx, events, ChatEvent{
 			Type:       ChatEventRetry,
 			Err:        perr.Err,
 			Attempt:    attempt + 1,
 			MaxAttempt: maxRetryAttempts,
 			RetryAfter: delay,
+		}) {
+			return
 		}
 		select {
 		case <-ctx.Done():
@@ -195,7 +199,9 @@ func (p *NightcodeProvider) streamOnce(ctx context.Context, req ChatRequest, eve
 		if len(chunk.Choices) > 0 {
 			delta := chunk.Choices[0].Delta
 			if delta.Content != "" {
-				events <- ChatEvent{Type: ChatEventDelta, Text: delta.Content}
+				if !sendChatEvent(ctx, events, ChatEvent{Type: ChatEventDelta, Text: delta.Content}) {
+					return nil
+				}
 			}
 			for _, tc := range delta.ToolCalls {
 				toolCalls = append(toolCalls, ToolCall{
@@ -218,7 +224,9 @@ func (p *NightcodeProvider) streamOnce(ctx context.Context, req ChatRequest, eve
 	log.Printf("nightcode streamOnce: done, %d chunks, %d tool calls", chunkCount, len(toolCalls))
 
 	if len(toolCalls) > 0 {
-		events <- ChatEvent{Type: ChatEventToolCalls, ToolCalls: toolCalls}
+		if !sendChatEvent(ctx, events, ChatEvent{Type: ChatEventToolCalls, ToolCalls: toolCalls}) {
+			return nil
+		}
 	}
 	return nil
 }

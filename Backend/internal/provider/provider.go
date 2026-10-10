@@ -95,3 +95,15 @@ func (e *ProviderError) Unwrap() error { return e.Err }
 type Provider interface {
 	StreamChat(ctx context.Context, req ChatRequest) (<-chan ChatEvent, error)
 }
+
+// sendChatEvent sends ev to the events channel, aborting if ctx is done.
+// Returns false if the send was abandoned due to cancellation, so callers
+// can stop streaming instead of blocking forever on a channel nobody reads.
+func sendChatEvent(ctx context.Context, events chan<- ChatEvent, ev ChatEvent) bool {
+	select {
+	case events <- ev:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}

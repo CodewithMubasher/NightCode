@@ -1,10 +1,6 @@
 package context
 
 import (
-	"context"
-	"fmt"
-	"strings"
-
 	"github.com/CodewithMubasher/NightCode/backend/internal/tools"
 )
 
@@ -40,8 +36,6 @@ type BuildRequest struct {
 	ChatID    string
 	History   []Message // prior turns in this chat, already loaded from the store
 }
-
-
 
 // baseSystemPrompt is always included, ahead of any workspace-specific
 // .nightcode/instructions.md content. It defines core agent behavior that

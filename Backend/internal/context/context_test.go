@@ -20,6 +20,12 @@ func newWS(t *testing.T, dir string) *tools.Workspace {
 	return ws
 }
 
+// buildCtx adapts the legacy package-level Build tests to the ContextManager API.
+func buildCtx(t *testing.T, req BuildRequest) (ManagedContext, error) {
+	t.Helper()
+	return NewContextManager(ContextBudget{}).Build(context.Background(), req)
+}
+
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -36,7 +42,7 @@ func TestBuild_InstructionsPresent(t *testing.T) {
 	ins := "# Project Rules\n\n- Use tabs, not spaces.\n- Do not delete tests.\n"
 	writeFile(t, filepath.Join(dir, ".nightcode", "instructions.md"), ins)
 
-	bc, err := Build(context.Background(), BuildRequest{Workspace: newWS(t, dir)})
+	bc, err := buildCtx(t, BuildRequest{Workspace: newWS(t, dir)})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -57,7 +63,7 @@ func TestBuild_NoNightcodeDir(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "main.go"), "package main\n")
 
-	bc, err := Build(context.Background(), BuildRequest{Workspace: newWS(t, dir)})
+	bc, err := buildCtx(t, BuildRequest{Workspace: newWS(t, dir)})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -95,7 +101,7 @@ func TestBuild_SkillsManifest(t *testing.T) {
 	// A non-.md file must be ignored
 	writeFile(t, filepath.Join(skillsDir, "README.txt"), "ignored")
 
-	bc, err := Build(context.Background(), BuildRequest{Workspace: newWS(t, dir)})
+	bc, err := buildCtx(t, BuildRequest{Workspace: newWS(t, dir)})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -133,7 +139,7 @@ func TestBuild_GitContext(t *testing.T) {
 	runGit(t, repo, "commit", "-m", "init")
 	writeFile(t, filepath.Join(repo, "tracked.txt"), "v2\n") // now modified
 
-	bc, err := Build(context.Background(), BuildRequest{Workspace: newWS(t, repo)})
+	bc, err := buildCtx(t, BuildRequest{Workspace: newWS(t, repo)})
 	if err != nil {
 		t.Fatalf("Build git repo: %v", err)
 	}
@@ -150,7 +156,7 @@ func TestBuild_GitContext(t *testing.T) {
 	// --- non-git repo: section cleanly absent, no error/warning
 	notRepo := t.TempDir()
 	writeFile(t, filepath.Join(notRepo, "a.txt"), "x\n")
-	bc2, err := Build(context.Background(), BuildRequest{Workspace: newWS(t, notRepo)})
+	bc2, err := buildCtx(t, BuildRequest{Workspace: newWS(t, notRepo)})
 	if err != nil {
 		t.Fatalf("Build non-git: %v", err)
 	}
@@ -172,7 +178,7 @@ func TestBuild_FileTreeTruncation(t *testing.T) {
 		writeFile(t, filepath.Join(dir, "f", "file"+pad(i)+".txt"), "x\n")
 	}
 
-	bc, err := Build(context.Background(), BuildRequest{Workspace: newWS(t, dir)})
+	bc, err := buildCtx(t, BuildRequest{Workspace: newWS(t, dir)})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -198,7 +204,7 @@ func TestBuild_HistoryPassthrough(t *testing.T) {
 		{Role: "user", Content: "second question"},
 	}
 
-	bc, err := Build(context.Background(), BuildRequest{Workspace: newWS(t, dir), History: history})
+	bc, err := buildCtx(t, BuildRequest{Workspace: newWS(t, dir), History: history})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"time"
 
 	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
@@ -13,9 +14,24 @@ import (
 
 const (
 	cloudflareDefaultModel   = "@cf/openai/gpt-oss-20b"
-	cloudflareAccountID      = "4bf1720eea8954695027af95c83b7600"
-	cloudflareDefaultBaseURL = "https://api.cloudflare.com/client/v4/accounts/" + cloudflareAccountID + "/ai/v1"
+	// cloudflareDefaultAccountID is the fallback account ID kept for
+	// backwards compatibility; override with CLOUDFLARE_ACCOUNT_ID.
+	cloudflareDefaultAccountID = "4bf1720eea8954695027af95c83b7600"
 )
+
+// cloudflareBaseURL builds the Workers AI base URL from the account ID,
+// honouring CLOUDFLARE_BASE_URL when set, otherwise constructing it from
+// CLOUDFLARE_ACCOUNT_ID (or the built-in default).
+func cloudflareBaseURL(baseURL string) string {
+	if baseURL != "" {
+		return baseURL
+	}
+	acct := os.Getenv("CLOUDFLARE_ACCOUNT_ID")
+	if acct == "" {
+		acct = cloudflareDefaultAccountID
+	}
+	return "https://api.cloudflare.com/client/v4/accounts/" + acct + "/ai/v1"
+}
 
 // CloudflareProvider implements Provider using Eino's OpenAI-compatible ChatModel
 // adapter pointed at Cloudflare Workers AI.
@@ -29,9 +45,7 @@ func NewCloudflareProvider(ctx context.Context, apiKey, model, baseURL string) (
 	if model == "" {
 		model = cloudflareDefaultModel
 	}
-	if baseURL == "" {
-		baseURL = cloudflareDefaultBaseURL
-	}
+	baseURL = cloudflareBaseURL(baseURL)
 
 	cm, err := einoopenai.NewChatModel(ctx, &einoopenai.ChatModelConfig{
 		APIKey:  apiKey,
@@ -71,17 +85,21 @@ func (p *CloudflareProvider) streamWithRetry(ctx context.Context, req ChatReques
 		}
 
 		if !perr.Retryable || attempt >= maxRetryAttempts-1 {
-			events <- ChatEvent{Type: ChatEventError, Err: perr}
+			if !sendChatEvent(ctx, events, ChatEvent{Type: ChatEventError, Err: perr}) {
+				return
+			}
 			return
 		}
 
 		log.Printf("cloudflare provider: retryable error (attempt %d/%d): %v", attempt+1, maxRetryAttempts, perr.Err)
-		events <- ChatEvent{
+		if !sendChatEvent(ctx, events, ChatEvent{
 			Type:       ChatEventRetry,
 			Err:        perr.Err,
 			Attempt:    attempt + 1,
 			MaxAttempt: maxRetryAttempts,
 			RetryAfter: delay,
+		}) {
+			return
 		}
 		select {
 		case <-ctx.Done():
@@ -130,7 +148,9 @@ func (p *CloudflareProvider) streamOnce(ctx context.Context, req ChatRequest, ev
 		}
 
 		if msg.Content != "" {
-			events <- ChatEvent{Type: ChatEventDelta, Text: msg.Content}
+			if !sendChatEvent(ctx, events, ChatEvent{Type: ChatEventDelta, Text: msg.Content}) {
+				return nil
+			}
 		}
 		for _, tc := range msg.ToolCalls {
 			toolCalls = append(toolCalls, ToolCall{
@@ -143,7 +163,9 @@ func (p *CloudflareProvider) streamOnce(ctx context.Context, req ChatRequest, ev
 	}
 
 	if len(toolCalls) > 0 {
-		events <- ChatEvent{Type: ChatEventToolCalls, ToolCalls: toolCalls}
+		if !sendChatEvent(ctx, events, ChatEvent{Type: ChatEventToolCalls, ToolCalls: toolCalls}) {
+			return nil
+		}
 	}
 	return nil
 }

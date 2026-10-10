@@ -234,7 +234,7 @@ func (l *Loop) Run(ctx context.Context, ws *tools.Workspace, chatID string, user
 
 		// No tool calls → final answer.
 		if len(toolCalls) == 0 {
-			emitDone(events, evtID, seg.ID, now)
+			emitDone(ctx, events, evtID, seg.ID, now)
 			finalize()
 			select {
 			case events <- types.RuntimeEvent{Type: "turn.completed", ID: evtID(), Timestamp: now()}:
@@ -274,7 +274,7 @@ func (l *Loop) Run(ctx context.Context, ws *tools.Workspace, chatID string, user
 
 	// Iteration cap hit — work was done, just can't continue further.
 	finalize()
-	emitDone(events, evtID, "", now)
+	emitDone(ctx, events, evtID, "", now)
 	select {
 	case events <- types.RuntimeEvent{Type: "turn.completed", ID: evtID(), Timestamp: now()}:
 	case <-ctx.Done():
@@ -298,7 +298,15 @@ func (l *Loop) executeTools(
 	var wg sync.WaitGroup
 
 	// sendEvent sends an event, respecting context cancellation.
+	// It recovers from send-on-closed-channel panics: after the 5-minute
+	// tool timeout below, Loop.Run may close(events) while a slow tool
+	// goroutine is still trying to report its result.
 	sendEvent := func(evt types.RuntimeEvent) {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("sendEvent: dropped event after channel close: %v", r)
+			}
+		}()
 		select {
 		case events <- evt:
 		case <-ctx.Done():
@@ -326,7 +334,7 @@ func (l *Loop) executeTools(
 				Input:      input,
 			})
 
-			t, ok := l.registry[tc.Name]
+			t, ok := l.registry.Lookup(tc.Name)
 			var result tools.ToolResult
 			var err error
 			if !ok {
@@ -521,7 +529,10 @@ func buildToolSpecs(registry tools.ToolRegistry) []provider.ToolSpec {
 	names := registry.Names()
 	specs := make([]provider.ToolSpec, 0, len(names))
 	for _, name := range names {
-		t := registry[name]
+		t := registry.Get(name)
+		if t == nil {
+			continue
+		}
 		specs = append(specs, provider.ToolSpec{
 			Name:        t.Name(),
 			Description: t.Description(),
@@ -558,12 +569,15 @@ func appendMessagesWithToolResults(msgs []provider.Message, toolCalls []provider
 	return msgs
 }
 
-func emitDone(events chan<- types.RuntimeEvent, evtID func() string, segID string, now func() int64) {
-	events <- types.RuntimeEvent{
+func emitDone(ctx context.Context, events chan<- types.RuntimeEvent, evtID func() string, segID string, now func() int64) {
+	select {
+	case events <- types.RuntimeEvent{
 		Type:      "assistant.delta",
 		ID:        evtID(),
 		SegmentID: segID,
 		Timestamp: now(),
 		Text:      DoneSentinel,
+	}:
+	case <-ctx.Done():
 	}
 }

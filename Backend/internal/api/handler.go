@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -403,10 +404,14 @@ func (h *Handler) HandleSendMessage(w http.ResponseWriter, r *http.Request) {
 	for event := range events {
 		payload, err := json.Marshal(event)
 		if err != nil {
-			log.Printf("marshal event error: %v", err)
-			return
+			// Skip the malformed event rather than killing the whole stream.
+			log.Printf("marshal event error (skipping): %v", err)
+			continue
 		}
 		if _, err := w.Write([]byte("data: " + string(payload) + "\n\n")); err != nil {
+			// Client disconnected — stop writing. The deferred cancel() above
+			// stops the producer, and the drainer goroutine unblocks any
+			// in-flight sends so the producer can close the channel cleanly.
 			log.Printf("write event error: %v", err)
 			return
 		}
@@ -428,12 +433,16 @@ func (h *Handler) HandleSendMessage(w http.ResponseWriter, r *http.Request) {
 			"id":   lastSegmentID,
 			"text": finalText,
 		}
-		segmentsJSON, _ := json.Marshal([]any{segment})
-		msgID := uuid.New().String()
-		if err := h.store.InsertMessage(msgID, chatID, "assistant", segmentsJSON); err != nil {
-			log.Printf("persist assistant message error: %v", err)
+		segmentsJSON, mErr := json.Marshal([]any{segment})
+		if mErr != nil {
+			log.Printf("marshal assistant segments error: %v", mErr)
 		} else {
-			log.Printf("persisted assistant message for chat=%s", chatID)
+			msgID := uuid.New().String()
+			if err := h.store.InsertMessage(msgID, chatID, "assistant", segmentsJSON); err != nil {
+				log.Printf("persist assistant message error: %v", err)
+			} else {
+				log.Printf("persisted assistant message for chat=%s", chatID)
+			}
 		}
 	}
 
@@ -483,6 +492,20 @@ func (h *Handler) runRealLoop(ctx context.Context, p provider.Provider, workspac
 		ws, err = tools.NewWorkspace(os.TempDir())
 		if err != nil {
 			log.Printf("FATAL: fallback workspace also failed: %v", err)
+			// Emit an error event and close the channel so the SSE reader
+			// terminates instead of hanging forever on `range events`.
+			select {
+			case events <- types.RuntimeEvent{
+				Type:      "turn.error",
+				ID:        uuid.New().String(),
+				Timestamp: time.Now().UnixMilli(),
+				Error:     "failed to resolve workspace directory: " + err.Error(),
+				Code:      "workspace_unavailable",
+				Retryable: false,
+			}:
+			case <-ctx.Done():
+			}
+			close(events)
 			return
 		}
 		log.Printf("WARNING: using OS temp dir as workspace fallback for chat=%s — files created this turn will not be in a stable location", chatID)
@@ -559,7 +582,11 @@ func expandAssistantSegments(segments json.RawMessage) []ctxbuilder.Message {
 			}
 			for _, call := range seg.Calls {
 				// Marshal input back to JSON string for provider.ToolCall.Arguments.
-				argsBytes, _ := json.Marshal(call.Input)
+				argsBytes, mErr := json.Marshal(call.Input)
+				if mErr != nil {
+					log.Printf("marshal tool call input error: %v", mErr)
+					argsBytes = []byte("{}")
+				}
 				assistantMsg.ToolCalls = append(assistantMsg.ToolCalls, ctxbuilder.ToolCallInfo{
 					ID:        call.ToolCallID,
 					Name:      call.Name,
@@ -598,12 +625,22 @@ func expandAssistantSegments(segments json.RawMessage) []ctxbuilder.Message {
 // than the OS temp dir — so files created by the agent land somewhere
 // predictable and persistent instead of a throwaway location the user has
 // no reason to think to check.
+// The workspaceID is sanitized to prevent path traversal (e.g. "..%2F..").
 func (h *Handler) resolveWorkspacePath(workspaceID string) string {
 	root := h.workspacesRoot
 	if root == "" {
 		root = "workspaces"
 	}
-	return filepath.Join(root, workspaceID)
+	// Reject IDs that could escape the root: clean the joined path and
+	// verify it still lives under the cleaned root.
+	cleanRoot := filepath.Clean(root)
+	joined := filepath.Join(cleanRoot, filepath.FromSlash(workspaceID))
+	if joined != cleanRoot && !strings.HasPrefix(joined, cleanRoot+string(filepath.Separator)) {
+		// Traversal attempt — fall back to a safe subfolder name.
+		log.Printf("resolveWorkspacePath: rejected traversal attempt for workspaceID=%q", workspaceID)
+		return filepath.Join(cleanRoot, "_invalid")
+	}
+	return joined
 }
 
 // DELETE /api/workspaces/{workspaceId}/chats/{chatId}/runs/{runId}
@@ -623,7 +660,9 @@ func (h *Handler) HandleCancelRun(w http.ResponseWriter, r *http.Request) {
 	log.Printf("HandleCancelRun: cancelled run for chat=%s", chatID)
 
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(`{"ok":true}`))
+	if _, err := w.Write([]byte(`{"ok":true}`)); err != nil {
+		log.Printf("HandleCancelRun write error: %v", err)
+	}
 }
 
 // GET /api/workspaces/{workspaceId}/chats
@@ -638,7 +677,7 @@ func (h *Handler) HandleListChats(w http.ResponseWriter, r *http.Request) {
 		chats = []store.ChatRow{}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(chats)
+	writeJSON(w, chats)
 }
 
 // GET /api/workspaces/{workspaceId}/chats/{chatId}/messages
@@ -655,7 +694,7 @@ func (h *Handler) HandleListMessages(w http.ResponseWriter, r *http.Request) {
 		msgs = []store.MessageRow{}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(msgs)
+	writeJSON(w, msgs)
 }
 
 // GET /api/workspaces/{workspaceId}/chats/{chatId}/artifacts
@@ -672,7 +711,7 @@ func (h *Handler) HandleListArtifacts(w http.ResponseWriter, r *http.Request) {
 		artifacts = []store.ArtifactRow{}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(artifacts)
+	writeJSON(w, artifacts)
 }
 
 // GET /api/workspaces
@@ -688,7 +727,7 @@ func (h *Handler) HandleListWorkspaces(w http.ResponseWriter, r *http.Request) {
 		workspaces = []store.WorkspaceRow{}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(workspaces)
+	writeJSON(w, workspaces)
 }
 
 type createWorkspaceRequest struct {
@@ -724,7 +763,7 @@ func (h *Handler) HandleCreateWorkspace(w http.ResponseWriter, r *http.Request) 
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"id": id})
+	writeJSON(w, map[string]string{"id": id})
 }
 
 // DELETE /api/workspaces/{workspaceId}
@@ -736,5 +775,15 @@ func (h *Handler) HandleDeleteWorkspace(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(`{"ok":true}`))
+	if _, err := w.Write([]byte(`{"ok":true}`)); err != nil {
+		log.Printf("HandleDeleteWorkspace write error: %v", err)
+	}
+}
+
+// writeJSON encodes v as the JSON response body, logging any encoding error
+// instead of silently swallowing it.
+func writeJSON(w http.ResponseWriter, v any) {
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		log.Printf("write json response error: %v", err)
+	}
 }

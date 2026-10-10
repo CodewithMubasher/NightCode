@@ -75,17 +75,21 @@ func (p *GeminiProvider) streamWithRetry(ctx context.Context, req ChatRequest, e
 
 		// Non-retryable (auth / unknown / cancellation) — surface immediately.
 		if !perr.Retryable || attempt >= maxRetryAttempts-1 {
-			events <- ChatEvent{Type: ChatEventError, Err: perr}
+			if !sendChatEvent(ctx, events, ChatEvent{Type: ChatEventError, Err: perr}) {
+				return
+			}
 			return
 		}
 
 		log.Printf("gemini provider: retryable error (attempt %d/%d): %v", attempt+1, maxRetryAttempts, perr.Err)
-		events <- ChatEvent{
+		if !sendChatEvent(ctx, events, ChatEvent{
 			Type:       ChatEventRetry,
 			Err:        perr.Err,
 			Attempt:    attempt + 1,
 			MaxAttempt: maxRetryAttempts,
 			RetryAfter: delay,
+		}) {
+			return
 		}
 		select {
 		case <-ctx.Done():
@@ -137,7 +141,9 @@ func (p *GeminiProvider) streamOnce(ctx context.Context, req ChatRequest, events
 		}
 
 		if msg.Content != "" {
-			events <- ChatEvent{Type: ChatEventDelta, Text: msg.Content}
+			if !sendChatEvent(ctx, events, ChatEvent{Type: ChatEventDelta, Text: msg.Content}) {
+				return nil
+			}
 		}
 		for _, tc := range msg.ToolCalls {
 			toolCalls = append(toolCalls, ToolCall{
@@ -150,7 +156,9 @@ func (p *GeminiProvider) streamOnce(ctx context.Context, req ChatRequest, events
 	}
 
 	if len(toolCalls) > 0 {
-		events <- ChatEvent{Type: ChatEventToolCalls, ToolCalls: toolCalls}
+		if !sendChatEvent(ctx, events, ChatEvent{Type: ChatEventToolCalls, ToolCalls: toolCalls}) {
+			return nil
+		}
 	}
 	return nil
 }

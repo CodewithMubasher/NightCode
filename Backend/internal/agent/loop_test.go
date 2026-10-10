@@ -55,7 +55,7 @@ func (fakeFailTool) Execute(ctx context.Context, input json.RawMessage, ws *tool
 }
 
 func failRegistry() tools.ToolRegistry {
-	r := tools.ToolRegistry{}
+	r := tools.NewEmptyRegistry()
 	r.Register(fakeFailTool{})
 	return r
 }
@@ -120,7 +120,7 @@ func (fakeOkTool) Execute(ctx context.Context, input json.RawMessage, ws *tools.
 }
 
 func okRegistry() tools.ToolRegistry {
-	r := tools.ToolRegistry{}
+	r := tools.NewEmptyRegistry()
 	r.Register(fakeOkTool{})
 	return r
 }
